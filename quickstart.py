@@ -1,6 +1,6 @@
 """
 Quick sanity check — run this first after installing dependencies.
-Tests data fetching and signal generation without sending any SMS.
+Tests data fetching and signal generation without sending any email.
 
 Run: python quickstart.py
 """

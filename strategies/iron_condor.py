@@ -7,7 +7,7 @@ Screens for candidates where:
   - 30-45 DTE options exist
   - Constructs suggested strikes at target delta
 
-Returns suggested condor structures with SMS-ready descriptions.
+Returns suggested condor structures with email-ready descriptions.
 """
 
 import numpy as np

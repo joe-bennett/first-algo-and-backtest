@@ -72,6 +72,25 @@ Go to the **Signals** page in the dashboard. Check **Dry run** to preview what t
 ### Explore factor weights
 The **Research Sandbox** page lets you adjust value vs. momentum weights with a slider and instantly see how the top-ranked stocks change, without running a full backtest. Good for quick "what if" questions.
 
+### View current holdings
+A local ledger is saved to `data/ledger.csv` and `data/ledger.json` after every rebalance, stop-loss replacement, and daily run. Open `ledger.csv` in Excel any time to see:
+
+| Column | Description |
+|---|---|
+| ticker / side | What you hold and whether it's long or short |
+| qty / entry_price | Shares held and average cost basis |
+| current_price / current_value | Live price and position value |
+| unrealized_pl / unrealized_pl_pct | Dollar and percent gain/loss |
+| portfolio_weight_pct | What percentage of the portfolio this position represents |
+| stop_loss_price | The price at which the stop order will trigger |
+
+You can also print it from Python:
+```python
+from broker.ledger import save_ledger, print_ledger
+save_ledger()   # pull latest from Alpaca and write files
+print_ledger()  # formatted table in the terminal
+```
+
 ---
 
 ## How to Change the Portfolio
@@ -146,9 +165,17 @@ config/
 strategies/          ← strategy logic (scoring, ranking, signal generation)
 backtesting/         ← backtest engine; results saved as HTML charts
 alerts/              ← signal scanner and email sender
-broker/              ← Alpaca paper trading integration
+broker/
+  alpaca.py          ← Alpaca paper trading (orders, rebalance, stop-loss)
+  position_manager.py ← daily stop-loss replacement logic
+  ledger.py          ← local portfolio ledger (writes data/ledger.csv + data/ledger.json)
 dashboard/           ← Streamlit app
 utils/               ← data fetching and performance metrics
+
+data/                ← runtime files (gitignored)
+  ledger.csv         ← current holdings — open in Excel
+  ledger.json        ← same data in JSON for dashboard/code use
+  last_signals.json  ← last rebalance signals, used for stop-loss detection
 ```
 
 ---

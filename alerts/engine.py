@@ -1,5 +1,5 @@
 """
-Alert engine — orchestrates signal generation and fires SMS when conditions are met.
+Alert engine — orchestrates signal generation and fires email when conditions are met.
 
 Run this on a schedule (e.g., daily after market close) or manually.
 """
@@ -43,8 +43,8 @@ def _is_quiet_hours(alerts_cfg: dict) -> bool:
 
 def run_equity_scan(dry_run: bool = False) -> pd.DataFrame:
     """
-    Run the 120/20 value-momentum scan and send SMS for the top/bottom signals.
-    dry_run=True prints the messages without sending SMS.
+    Run the 120/20 value-momentum scan and send email for the top/bottom signals.
+    dry_run=True prints the messages without sending email.
     """
     cfg = load_config()
     alerts_cfg = load_alerts_config()
@@ -65,7 +65,7 @@ def run_equity_scan(dry_run: bool = False) -> pd.DataFrame:
         print("No signals generated.")
         return signals
 
-    # Build SMS message
+    # Build email message
     date_str = datetime.today().strftime("%Y-%m-%d")
     lines = [f"=== PORTFOLIO SIGNAL: {date_str} ===\n"]
 
@@ -152,6 +152,6 @@ def run_condor_scan(tickers: list[str] | None = None, dry_run: bool = False) -> 
 
 
 if __name__ == "__main__":
-    # Quick test — prints signals without sending SMS
+    # Quick test — prints signals without sending email
     run_equity_scan(dry_run=True)
     run_condor_scan(dry_run=True)

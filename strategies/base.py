@@ -24,6 +24,6 @@ class BaseStrategy(ABC):
     def describe_signal(self, signal_row: pd.Series) -> str:
         """
         Return a human-readable explanation for a single signal row.
-        This text goes directly into the SMS alert.
+        This text goes directly into the email alert.
         """
         ...

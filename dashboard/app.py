@@ -135,7 +135,7 @@ elif page == "Signals":
     col1, col2 = st.columns(2)
     run_equity = col1.button("Run Equity Scan (120/20)")
     run_condor = col2.button("Run Condor Scan")
-    dry_run = st.checkbox("Dry run (don't send SMS)", value=True)
+    dry_run = st.checkbox("Dry run (don't send email)", value=True)
 
     if run_equity:
         with st.spinner("Scanning S&P 500..."):

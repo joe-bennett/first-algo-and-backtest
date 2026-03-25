@@ -16,6 +16,7 @@ Start with manual execution on alerts, evolve toward live automated trading.
 - `alerts/notifier.py` — email sender via Gmail/smtplib
 - `broker/alpaca.py` — Alpaca paper trading integration (orders, rebalance, stop-loss)
 - `broker/position_manager.py` — daily stop-loss replacement logic
+- `broker/ledger.py` — local portfolio ledger; saves `data/ledger.csv` + `data/ledger.json`
 - `run_alerts.py` — scheduled runner (called by Windows Task Scheduler)
 - `quickstart.py` — sanity check after install
 
@@ -99,3 +100,20 @@ Start with manual execution on alerts, evolve toward live automated trading.
   - Signals persisted to data/last_signals.json after each rebalance
 - Added .gitignore (excludes .env, __pycache__, data/, logs/)
 - requirements.txt: removed twilio, added alpaca-py
+- Pushed project to GitHub: https://github.com/joe-bennett/first-algo-and-backtest
+- Added README.md with quick start, analysis guide, and portfolio configuration instructions
+- Updated GUIDE.md: replaced all SMS/Twilio references with Gmail email throughout
+
+### 2026-03-25 (continued)
+- Added iron condor contract sizing based on portfolio value
+  - portfolio.yaml: per_condor_pct (5%), max_total_pct (15%), default_portfolio_value
+  - iron_condor.py: calculates contracts, margin reserved, max profit/loss per alert
+  - engine.py: fetches live portfolio value from Alpaca, passes to condor scanner
+  - Alert email now tells you exactly how many contracts to trade and dollar amounts
+- Cleaned up alerts/notifier.py: removed leftover send_sms alias, all callers use send_alert
+- Fixed Windows UTF-8 encoding error: added encoding="utf-8" to all yaml file opens
+- Added local portfolio ledger (broker/ledger.py)
+  - Saves data/ledger.csv (open in Excel) and data/ledger.json after every event
+  - Columns: ticker, side, qty, entry price, current price, value, P&L, weight, stop-loss
+  - Auto-updates: daily price refresh, post-rebalance, post-stop-loss replacement
+- Fixed all stale SMS/Twilio references in code comments and docstrings
