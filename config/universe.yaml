@@ -1,0 +1,116 @@
+# =============================================================================
+# Universe Configuration
+# Change `preset` to switch between universes instantly.
+# All filter thresholds below are adjustable at any time.
+# =============================================================================
+
+# --- Choose your universe ---
+# Options: "all_us" | "sp500" | "sp1500" | "nasdaq100" | "custom"
+preset: "all_us"
+
+# --- Preset definitions (sources, no API key needed) ---
+presets:
+  all_us:
+    name: "All US Listed Equities"
+    exchanges: ["NASDAQ", "NYSE", "AMEX"]   # CBOE/IEX small-caps excluded by filters below
+    source: "nasdaq_ftp"                    # Free NASDAQ FTP — full listed universe
+    description: "All exchange-listed US equities, filtered by liquidity and quality"
+
+  sp500:
+    name: "S&P 500"
+    exchanges: ["NYSE", "NASDAQ"]
+    source: "wikipedia"
+    description: "Current S&P 500 constituents only"
+
+  sp1500:
+    name: "S&P 1500 (500 + MidCap + SmallCap)"
+    exchanges: ["NYSE", "NASDAQ"]
+    source: "sp1500_wikipedia"
+    description: "Broader index — better factor diversification than S&P 500 alone"
+
+  nasdaq100:
+    name: "NASDAQ 100"
+    exchanges: ["NASDAQ"]
+    source: "wikipedia_nasdaq100"
+    description: "Top 100 NASDAQ non-financial companies"
+
+  custom:
+    name: "Custom Ticker List"
+    exchanges: []
+    source: "custom"
+    tickers: []                             # Populate manually: ["AAPL", "MSFT", ...]
+
+
+# =============================================================================
+# Filters — applied after fetching the raw universe list
+# Adjust these to change how many stocks pass into the strategy
+# =============================================================================
+
+filters:
+  # Market cap — removes micro-caps with data quality issues
+  min_market_cap_M: 300           # Minimum $300M market cap (was $2B for S&P 500 only)
+  # Set higher to reduce universe:
+  #   $300M   → ~4,000–5,000 stocks
+  #   $1,000M → ~2,000 stocks
+  #   $5,000M → ~800 stocks
+
+  # Liquidity — removes illiquid stocks where fills would be bad
+  min_avg_daily_volume: 100000    # Minimum 100k shares/day average volume
+  min_avg_daily_dollar_volume_M: 1.0   # Minimum $1M/day average dollar volume
+
+  # Price — removes penny stocks (bad data, wide spreads)
+  min_price: 5.00                 # Minimum $5/share
+
+  # Listing type — set false to include OTC/pink sheets (not recommended)
+  exchange_listed_only: true
+
+  # Data quality — exclude if price history is too sparse
+  min_history_days: 252           # Need at least 1 year of price history for momentum
+
+  # ADR / foreign listings — include or exclude
+  include_adrs: true              # American Depositary Receipts (foreign cos listed on US exchanges)
+  include_etfs: false             # ETFs — typically excluded from equity strategies
+  include_spacs: false            # SPACs — exclude (no real fundamentals)
+
+  # Sectors to exclude entirely (e.g., hard to short, regulatory issues)
+  exclude_sectors: []
+  # Example: ["Utilities", "Real Estate"]   ← REITs behave differently, some prefer to exclude
+
+
+# =============================================================================
+# Sector exposure caps — prevents concentration in any one sector
+# =============================================================================
+
+sector_caps:
+  enabled: true
+  default_max: 0.30               # No sector > 30% of portfolio by default
+  overrides: {}
+  # Example overrides:
+  #   "Technology": 0.40          ← allow tech up to 40%
+  #   "Energy": 0.15              ← cap energy at 15%
+  #   "Financials": 0.20
+
+
+# =============================================================================
+# Explicit ticker exclusions / inclusions (applied last, override all filters)
+# =============================================================================
+
+exclusions:
+  tickers: []
+  # Add tickers you never want to trade regardless of score:
+  # ["GME", "AMC", "MEME"]
+
+inclusions:
+  tickers: []
+  # Force-include tickers that might be filtered out (e.g., high-conviction picks):
+  # ["BRK-B"]
+
+
+# =============================================================================
+# Cache settings — avoids re-downloading the full universe on every run
+# =============================================================================
+
+cache:
+  ticker_list_ttl_hours: 24       # Re-fetch ticker list every 24 hours
+  fundamentals_ttl_hours: 24      # Re-fetch fundamentals daily
+  price_ttl_hours: 4              # Re-fetch prices every 4 hours during market hours

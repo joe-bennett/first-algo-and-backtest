@@ -1,0 +1,31 @@
+# Core data
+openbb>=4.3.0
+openbb-yfinance>=0.3.0
+yfinance>=0.2.40
+pandas>=2.1.0
+numpy>=1.26.0
+
+# Backtesting
+vectorbt>=0.26.0
+
+# Dashboard
+streamlit>=1.35.0
+plotly>=5.20.0
+
+# Alerts / notifications
+# (email via smtplib — no extra package needed)
+
+# Broker integration
+alpaca-py>=0.20.0
+
+# Scheduling
+apscheduler>=3.10.0
+
+# Config & utilities
+python-dotenv>=1.0.0
+pyyaml>=6.0.1
+requests>=2.31.0
+
+# Jupyter for research notebooks
+jupyter>=1.0.0
+ipykernel>=6.29.0

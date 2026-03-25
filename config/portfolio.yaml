@@ -1,0 +1,41 @@
+# 120/20 Value-Momentum Strategy Parameters
+# Tweak these values and re-run backtest to compare impact
+
+strategy:
+  name: "120/20 Value Momentum"
+  rebalance_frequency: "monthly"     # monthly | quarterly
+  long_weight: 1.20                  # 120% long exposure
+  short_weight: 0.20                 # 20% short exposure
+  long_pct: 0.20                     # top 20% of ranked stocks = long book
+  short_pct: 0.20                    # bottom 20% of ranked stocks = short book
+
+# Factor weights for composite score (must sum to 1.0)
+value_factors:
+  pe_ratio: 0.30        # Price/Earnings (lower = better value, inverted)
+  pb_ratio: 0.25        # Price/Book (lower = better value, inverted)
+  fcf_yield: 0.25       # Free Cash Flow Yield (higher = better value)
+  ev_ebitda: 0.20       # EV/EBITDA (lower = better value, inverted)
+
+momentum_factors:
+  momentum_12_1: 1.0    # 12-month return skipping last month (100% weight for now)
+
+# Blend between value and momentum composite scores
+score_blend:
+  value_weight: 0.50
+  momentum_weight: 0.50
+
+# Risk controls
+risk:
+  max_single_position: 0.05     # No single stock > 5% of portfolio
+  max_sector_exposure: 0.30     # No sector > 30%
+  stop_loss_pct: 0.15           # Close position if down 15% from entry (null = disabled)
+
+# Iron Condor trigger thresholds
+iron_condor:
+  min_iv_rank: 50               # IV Rank must be >= 50 to consider trade
+  min_dte: 30                   # Minimum days to expiration
+  max_dte: 45                   # Maximum days to expiration
+  target_delta: 0.16            # ~1 standard deviation OTM
+  profit_target_pct: 0.50       # Close at 50% of max credit
+  stop_loss_multiplier: 2.0     # Close if loss = 2x credit received
+  exit_dte: 21                  # Close at 21 DTE regardless

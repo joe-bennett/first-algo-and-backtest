@@ -1,0 +1,20 @@
+# Credentials — never share these
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Data cache
+data/
+logs/
+
+# Claude Code local memory
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db

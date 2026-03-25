@@ -1,0 +1,25 @@
+# Alert configuration
+# Controls when and how trade signals are sent to you via SMS
+
+sms:
+  enabled: true
+  # Credentials loaded from .env — do not put them here
+
+# When to send alerts
+triggers:
+  rebalance_signal: true      # Send full rebalance list on scheduled rebalance date
+  new_signal: true            # Send when a new stock enters/exits the ranked list mid-period
+  condor_opportunity: true    # Send when iron condor conditions are met
+  risk_breach: true           # Send when a position breaches risk limits
+
+# Quiet hours — no SMS during these times (24h format, your local time)
+quiet_hours:
+  enabled: true
+  start: "22:00"
+  end: "07:00"
+
+# Alert detail level
+detail:
+  include_why: true           # Explain why the trade makes sense (factor scores)
+  include_how: true           # Include step-by-step execution instructions
+  include_current_vs_target: true  # Show current holdings vs target after rebalance
