@@ -15,7 +15,7 @@ and how to make common changes without needing to touch code.
 5. [Changing Your Universe](#5-changing-your-universe)
 6. [Changing Your Alert Settings](#6-changing-your-alert-settings)
 7. [Running a Backtest](#7-running-a-backtest)
-8. [Understanding the SMS Alerts](#8-understanding-the-sms-alerts)
+8. [Understanding the Email Alerts](#8-understanding-the-email-alerts)
 9. [File Map — What Every File Does](#9-file-map)
 10. [Phases — Where We Are and What's Next](#10-phases)
 11. [Common Questions](#11-common-questions)
@@ -30,7 +30,7 @@ Securities (stocks, options) live at a brokerage. The software tells you what to
 trade and why — you (or eventually the automation) execute it at the broker.
 
 You need two separate things running in parallel:
-- **This system** — generates signals, runs backtests, sends SMS alerts
+- **This system** — generates signals, runs backtests, sends email alerts
 - **A brokerage account** — actually holds your positions and executes trades
 
 ---
@@ -119,20 +119,20 @@ Only move forward if you're comfortable with what you see.
 2. You start with $100,000 in simulated money
 3. Come back and ask Claude to connect it to this system (Phase 2)
 
-**Step 4 — Preview today's signals (no SMS yet)**
+**Step 4 — Preview today's signals (no email yet)**
 In the dashboard → Signals page → check "Dry run" → Run Equity Scan.
 You'll see exactly what the system would recommend today — tickers, scores, weights,
-and the full SMS text it would send.
+and the full email text it would send.
 
-**Step 5 — Set up Twilio and receive your first real SMS**
-1. Sign up at twilio.com (free trial, ~$15 credit)
-2. Get your Account SID, Auth Token, and a phone number
+**Step 5 — Set up Gmail and receive your first real alert email**
+1. Use a Gmail account (the system sends from joe.d.bennett01@gmail.com by default)
+2. Generate a Gmail App Password (Google Account → Security → 2-Step Verification → App passwords)
 3. Fill in your `.env` file (see Section 1 below)
 4. In the dashboard → Signals → uncheck "Dry run" → Run Equity Scan
-5. You'll receive an SMS with the full signal list
+5. You'll receive an email with the full signal list
 
 **Step 6 — Decide how much of the strategy to execute**
-When you get your first signal SMS, you have options for how to act on it:
+When you get your first signal email, you have options for how to act on it:
 
 | Approach | What to do | Trade-off |
 |---|---|---|
@@ -146,7 +146,7 @@ from a plain momentum strategy. It's worth including eventually, but starting
 with longs only is a perfectly reasonable Phase 1 approach.
 
 **Step 7 — Execute the trades at your broker**
-The SMS gives you everything you need. Example:
+The email gives you everything you need. Example:
 ```
 LONG MSFT @ 1.2% of portfolio
   HOW: Buy market order at open
@@ -162,7 +162,7 @@ The system sends you a new signal list. Compare it to what you currently hold:
 - Stocks that dropped off the short book → cover (buy back)
 - New entries to the short book → short sell
 
-The SMS will eventually include a "current vs. target" comparison to make this easy.
+The email will eventually include a "current vs. target" comparison to make this easy.
 
 ---
 
@@ -176,21 +176,21 @@ Open a terminal in this folder and run:
 pip install -r requirements.txt
 ```
 This installs everything the system needs (OpenBB for data, VectorBT for backtesting,
-Streamlit for the dashboard, Twilio for SMS, etc.).
+Streamlit for the dashboard, etc.).
 
-### Step 2 — Sign up for Twilio (SMS alerts)
-1. Go to twilio.com and create a free account
-2. You'll get an Account SID, Auth Token, and a phone number
-3. The free trial gives you ~$15 credit — enough for hundreds of messages
+### Step 2 — Set up Gmail for alerts
+1. Use a Gmail account to send alerts from
+2. Enable 2-Step Verification on the account (Google Account → Security)
+3. Generate an App Password (Google Account → Security → 2-Step Verification → App passwords)
+4. The App Password is a 16-character code — treat it like a password
 
 ### Step 3 — Set up your credentials
 1. Copy `.env.example` and rename the copy to `.env`
-2. Open `.env` and fill in your Twilio values:
+2. Open `.env` and fill in your Gmail values:
 ```
-TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxx
-TWILIO_AUTH_TOKEN=your_token_here
-TWILIO_FROM_NUMBER=+15551234567    ← your Twilio phone number
-TWILIO_TO_NUMBER=+15559876543      ← your real cell phone number
+GMAIL_ADDRESS=you@gmail.com           ← the Gmail account sending alerts
+GMAIL_APP_PASSWORD=xxxx xxxx xxxx xxxx  ← your 16-character App Password
+ALERT_TO_EMAIL=you@gmail.com          ← where to send the alerts (can be the same address)
 ```
 **Never share or commit the `.env` file. It contains your private keys.**
 
@@ -198,7 +198,7 @@ TWILIO_TO_NUMBER=+15559876543      ← your real cell phone number
 ```
 python quickstart.py
 ```
-This runs through data fetching and signal generation without sending any SMS.
+This runs through data fetching and signal generation without sending any email.
 If it completes without errors, you're ready.
 
 ---
@@ -211,7 +211,7 @@ streamlit run dashboard/app.py
 ```
 A browser window opens automatically. This is your main control panel.
 
-### Run a signal scan (and send SMS if conditions are met)
+### Run a signal scan (and send email if conditions are met)
 ```
 python alerts/engine.py
 ```
@@ -248,7 +248,7 @@ Shows what the strategy recommends right now. Includes:
 - Top long candidates with their factor scores
 - Top short candidates
 - Any iron condor opportunities
-- Check "Dry run" to preview the SMS text before actually sending it
+- Check "Dry run" to preview the email text before actually sending it
 
 ### Research Sandbox
 Quickly change factor weights and see how the top-ranked stocks change —
@@ -381,20 +381,20 @@ The cache refreshes automatically every 4–24 hours depending on the data type.
 ### Turn off a type of alert
 ```yaml
 triggers:
-  rebalance_signal: true      ← set false to stop getting rebalance SMS
+  rebalance_signal: true      ← set false to stop getting rebalance emails
   condor_opportunity: true    ← set false to stop condor alerts
   risk_breach: true
 ```
 
-### Set quiet hours (no SMS during these times)
+### Set quiet hours (no emails during these times)
 ```yaml
 quiet_hours:
   enabled: true
-  start: "22:00"    ← no SMS after 10 PM
-  end: "07:00"      ← no SMS before 7 AM
+  start: "22:00"    ← no emails after 10 PM
+  end: "07:00"      ← no emails before 7 AM
 ```
 
-### Change what's included in the SMS
+### Change what's included in the email
 ```yaml
 detail:
   include_why: true           ← explains why the trade makes sense
@@ -439,7 +439,7 @@ Open any `.html` file in your browser to view it later.
 
 ---
 
-## 8. Understanding the SMS Alerts
+## 8. Understanding the Email Alerts
 
 ### Equity rebalance alert example
 ```
@@ -482,7 +482,7 @@ IRON CONDOR OPPORTUNITY: SPY
 config/
   portfolio.yaml     ← MAIN CONTROL FILE — strategy parameters, factor weights, risk limits
   universe.yaml      ← Which stocks to include and filters
-  alerts.yaml        ← When and how to send SMS
+  alerts.yaml        ← When and how to send emails
 
 strategies/
   value_momentum_120_20.py   ← Core equity strategy logic (scoring, ranking, signal generation)
@@ -494,7 +494,7 @@ backtesting/
 
 alerts/
   engine.py          ← Runs the scan, decides when to fire alerts
-  notifier.py        ← Sends the SMS via Twilio
+  notifier.py        ← Sends alert emails via Gmail
 
 dashboard/
   app.py             ← Launch this with "streamlit run dashboard/app.py"
@@ -521,16 +521,16 @@ quickstart.py        ← Sanity check — run this after first install
 
 ## 10. Phases
 
-### Phase 1 — Current (alerts, no automation)
+### Phase 1 — Complete (alerts, no automation)
 - Strategy scans run manually or on a schedule
-- SMS tells you what to trade and how
+- Email alerts tell you what to trade and why
 - You place the trades yourself in your brokerage
 - Backtesting fully functional
 
-### Phase 2 — Paper trading (next)
-- Connect Alpaca paper trading account (free at alpaca.markets)
+### Phase 2 — Current (paper trading)
+- Alpaca paper trading account connected (free at alpaca.markets)
 - System places simulated trades automatically
-- You watch the paper portfolio perform without real money
+- Monthly rebalance + daily stop-loss replacement run on schedule
 - Validate the system works before going live
 
 ### Phase 3 — Live trading
@@ -551,7 +551,7 @@ Add it to `inclusions.tickers` in `config/universe.yaml`.
 **Q: How do I stop getting alerts for a strategy I don't want?**
 Set the relevant trigger to `false` in `config/alerts.yaml`.
 
-**Q: How do I test what an SMS will look like without sending it?**
+**Q: How do I test what an alert email will look like without sending it?**
 In the dashboard, go to Signals page and check "Dry run" before clicking scan.
 Or run `python alerts/engine.py` — it defaults to dry run when run directly.
 
