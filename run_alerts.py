@@ -27,11 +27,20 @@ from alerts.engine import run_equity_scan, run_condor_scan
 from alerts.notifier import send_alert
 from broker.alpaca import rebalance, get_account
 from broker.position_manager import check_and_replace_stopped_positions, save_signals
+from broker.ledger import save_ledger
 
 
 def main():
     today = datetime.today()
     logging.info("=== Alert runner started ===")
+
+    # --- Daily: refresh local ledger with current prices and P&L ---
+    try:
+        logging.info("Refreshing portfolio ledger...")
+        save_ledger()
+        logging.info("Ledger updated.")
+    except Exception as e:
+        logging.error(f"Ledger update failed: {e}")
 
     # --- Daily: check for stopped-out positions and replace them ---
     try:
@@ -61,6 +70,7 @@ def main():
                 acct = get_account()
                 orders = rebalance(signals, dry_run=False)
                 save_signals(signals)
+                save_ledger()
                 logging.info(f"Rebalance complete: {len(orders)} orders placed.")
 
                 # Send summary email

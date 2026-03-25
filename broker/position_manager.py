@@ -148,3 +148,6 @@ def check_and_replace_stopped_positions(dry_run: bool = False) -> None:
             lines.append(f"  BUY {r['qty']:.4f} shares @ ~${r['price']:.2f}{stop_note}")
             lines.append("")
         send_alert(f"Stop-Loss Replacements: {date_str}", "\n".join(lines))
+
+        from broker.ledger import save_ledger
+        save_ledger()
