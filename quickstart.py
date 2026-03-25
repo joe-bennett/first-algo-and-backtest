@@ -42,7 +42,7 @@ from strategies.value_momentum_120_20 import ValueMomentum12020
 prices_full = get_price_history(tickers[:50], start="2022-01-01")
 fundamentals_full = get_fundamentals(list(prices_full.columns))
 
-with open("config/portfolio.yaml") as f:
+with open("config/portfolio.yaml", encoding="utf-8") as f:
     cfg = yaml.safe_load(f)
 
 strategy = ValueMomentum12020(cfg)

@@ -46,7 +46,7 @@ if page == "Portfolio Overview":
 
     st.markdown("---")
     st.subheader("Current Config")
-    with open(CONFIG_DIR / "portfolio.yaml") as f:
+    with open(CONFIG_DIR / "portfolio.yaml", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     st.json(cfg)
 
@@ -189,7 +189,7 @@ elif page == "Research Sandbox":
             from strategies.value_momentum_120_20 import ValueMomentum12020
             from utils.openbb_client import get_sp500_tickers, get_price_history, get_fundamentals
 
-            with open(CONFIG_DIR / "portfolio.yaml") as f:
+            with open(CONFIG_DIR / "portfolio.yaml", encoding="utf-8") as f:
                 cfg = yaml.safe_load(f)
             cfg["score_blend"]["value_weight"] = val_w
             cfg["score_blend"]["momentum_weight"] = mom_w

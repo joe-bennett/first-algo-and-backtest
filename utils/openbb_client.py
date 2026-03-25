@@ -68,7 +68,7 @@ def get_universe_tickers(universe_cfg: dict | None = None) -> list[str]:
     """
     import yaml
     if universe_cfg is None:
-        with open(ROOT / "config" / "universe.yaml") as f:
+        with open(ROOT / "config" / "universe.yaml", encoding="utf-8") as f:
             universe_cfg = yaml.safe_load(f)
 
     preset_name = universe_cfg.get("preset", "sp500")

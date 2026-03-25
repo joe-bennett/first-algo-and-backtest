@@ -24,7 +24,7 @@ RESULTS_DIR.mkdir(exist_ok=True)
 
 
 def load_config(config_override: dict | None = None) -> dict:
-    with open(CONFIG_DIR / "portfolio.yaml") as f:
+    with open(CONFIG_DIR / "portfolio.yaml", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     if config_override:
         cfg = _deep_merge(cfg, config_override)

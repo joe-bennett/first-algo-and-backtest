@@ -24,7 +24,7 @@ _CONFIG_PATH = Path(__file__).parent.parent / "config" / "portfolio.yaml"
 
 def _get_stop_loss_pct() -> float | None:
     """Read stop_loss_pct from portfolio.yaml. Returns None if disabled."""
-    with open(_CONFIG_PATH) as f:
+    with open(_CONFIG_PATH, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     val = cfg.get("risk", {}).get("stop_loss_pct")
     return float(val) if val is not None else None

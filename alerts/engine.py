@@ -18,12 +18,12 @@ CONFIG_DIR = Path(__file__).parent.parent / "config"
 
 
 def load_config() -> dict:
-    with open(CONFIG_DIR / "portfolio.yaml") as f:
+    with open(CONFIG_DIR / "portfolio.yaml", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
 def load_alerts_config() -> dict:
-    with open(CONFIG_DIR / "alerts.yaml") as f:
+    with open(CONFIG_DIR / "alerts.yaml", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
