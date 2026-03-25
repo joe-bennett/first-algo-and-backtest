@@ -39,3 +39,6 @@ iron_condor:
   profit_target_pct: 0.50       # Close at 50% of max credit
   stop_loss_multiplier: 2.0     # Close if loss = 2x credit received
   exit_dte: 21                  # Close at 21 DTE regardless
+  per_condor_pct: 0.05          # Reserve 5% of portfolio as margin per condor
+  max_total_pct: 0.15           # Max 15% of portfolio across all open condors (3 at once)
+  default_portfolio_value: 100000  # Fallback if Alpaca is not connected

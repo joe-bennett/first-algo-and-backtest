@@ -11,7 +11,7 @@ from pathlib import Path
 
 from strategies.value_momentum_120_20 import ValueMomentum12020
 from strategies.iron_condor import IronCondorScanner
-from alerts.notifier import send_sms
+from alerts.notifier import send_alert
 from utils.openbb_client import get_universe_tickers, get_price_history, get_fundamentals
 
 CONFIG_DIR = Path(__file__).parent.parent / "config"
@@ -90,7 +90,7 @@ def run_equity_scan(dry_run: bool = False) -> pd.DataFrame:
     elif _is_quiet_hours(alerts_cfg):
         print("Quiet hours active — email suppressed.")
     else:
-        send_sms(message)
+        send_alert(f"Portfolio Signal: {date_str}", message)
         print("Email alert sent.")
 
     return signals
@@ -98,24 +98,41 @@ def run_equity_scan(dry_run: bool = False) -> pd.DataFrame:
 
 def run_condor_scan(tickers: list[str] | None = None, dry_run: bool = False) -> pd.DataFrame:
     """
-    Screen for iron condor opportunities and send SMS if found.
+    Screen for iron condor opportunities and send email if found.
+    Contract count is sized to 5% of portfolio per condor (configurable in portfolio.yaml).
     """
     cfg = load_config()
     alerts_cfg = load_alerts_config()
+
+    # Fetch live portfolio value from Alpaca; fall back to config default
+    try:
+        from broker.alpaca import get_account
+        portfolio_value = get_account()["portfolio_value"]
+        print(f"Portfolio value (Alpaca): ${portfolio_value:,.2f}")
+    except Exception:
+        portfolio_value = cfg["iron_condor"].get("default_portfolio_value", 100000)
+        print(f"Alpaca unavailable — using default portfolio value: ${portfolio_value:,.2f}")
 
     if tickers is None:
         # Screen liquid large-caps only for condors (options liquidity matters)
         tickers = ["SPY", "QQQ", "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA"]
 
     scanner = IronCondorScanner(cfg)
-    signals = scanner.generate_signals({"tickers": tickers})
+    signals = scanner.generate_signals({"tickers": tickers, "portfolio_value": portfolio_value})
 
     if signals.empty:
         print("No condor opportunities found.")
         return signals
 
     date_str = datetime.today().strftime("%Y-%m-%d")
-    lines = [f"=== CONDOR OPPORTUNITIES: {date_str} ===\n"]
+    max_total_pct = cfg["iron_condor"].get("max_total_pct", 0.15)
+    total_margin = signals["margin_reserved"].sum()
+    lines = [
+        f"=== CONDOR OPPORTUNITIES: {date_str} ===\n",
+        f"Portfolio value: ${portfolio_value:,.2f} | "
+        f"Total margin reserved: ${total_margin:,.2f} ({total_margin/portfolio_value*100:.1f}% of portfolio) | "
+        f"Max allowed: {max_total_pct*100:.0f}%\n",
+    ]
     for _, row in signals.iterrows():
         lines.append(scanner.describe_signal(row))
         lines.append("")
@@ -128,7 +145,7 @@ def run_condor_scan(tickers: list[str] | None = None, dry_run: bool = False) -> 
     elif _is_quiet_hours(alerts_cfg):
         print("Quiet hours active — email suppressed.")
     else:
-        send_sms(message)
+        send_alert(f"Condor Opportunities: {date_str}", message)
         print("Condor email alert sent.")
 
     return signals

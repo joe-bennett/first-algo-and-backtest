@@ -296,7 +296,7 @@ value_factors:
 These must add up to 1.0. If you don't trust EV/EBITDA data quality, you could
 set it to 0.0 and redistribute weight to the others.
 
-### Iron condor thresholds
+### Iron condor thresholds and sizing
 ```yaml
 iron_condor:
   min_iv_rank: 50         ← only consider trades when IV Rank is >= 50
@@ -306,9 +306,14 @@ iron_condor:
   profit_target_pct: 0.50 ← close the trade at 50% of max profit
   stop_loss_multiplier: 2.0  ← close if loss reaches 2x the credit received
   exit_dte: 21            ← always close at 21 days to expiration
+  per_condor_pct: 0.05    ← reserve 5% of portfolio as margin per condor
+  max_total_pct: 0.15     ← max 15% across all open condors (3 at once)
+  default_portfolio_value: 100000  ← fallback if Alpaca is not connected
 ```
 Raising `min_iv_rank` to 60 makes the scanner more selective (only the highest premium
 environments trigger an alert).
+
+**How condor sizing works:** The alert email tells you exactly how many contracts to trade — no math needed. The system reserves `per_condor_pct` (5%) of your portfolio as the margin budget for each condor, then divides by the max loss per contract to arrive at a contract count. The 15% total cap means no more than 3 condors open at once before the scanner stops recommending new ones.
 
 ### Position size limits
 ```yaml
@@ -461,18 +466,20 @@ IRON CONDOR OPPORTUNITY: SPY
   Current price: $512.00 | IV Rank: 67
   Expiry: 2026-04-18 (38 DTE)
   Structure:
-    Buy 470P / Sell 480P — Sell 530C / Buy 540C
-  Est. credit: $2.45 | Max loss: $7.55
-  WHY: IV Rank 67 means elevated premium — good time to sell volatility.
-  HOW: Sell the condor as a single 4-leg order at midpoint ($2.45 credit target).
-  MANAGE: Close at 50% profit ($1.23 credit remaining) or at 21 DTE.
+    Buy  470P / Sell 480P — Sell 530C / Buy 540C
+  Credit: $2.45/share | Max loss: $7.55/share
+  SIZE: 6 contracts | Margin reserved: $4,530.00 | Max profit: $1,470.00 | Max loss: $4,530.00
+  WHY: IV Rank 67 (>=50) means elevated premium — good time to sell volatility.
+  HOW: Sell 6 condors as a single 4-leg order at midpoint ($2.45 credit target per contract).
+  MANAGE: Close at 50% profit (~$735.00 gain) or at 21 DTE.
 ```
 - **IV Rank 67**: Implied volatility is in the 67th percentile of its past year — above average, good for selling premium.
 - **Buy 470P / Sell 480P**: Your put spread (defines max loss on the downside).
 - **Sell 530C / Buy 540C**: Your call spread (defines max loss on the upside).
-- **Est. credit $2.45**: You collect $245 per contract (100 shares × $2.45).
-- **Max loss $7.55**: Worst case you lose $755 per contract.
-- **MANAGE line**: This tells you exactly when to close the trade.
+- **Credit $2.45/share**: You collect $245 per contract (100 shares × $2.45). With 6 contracts = $1,470 collected.
+- **Max loss $7.55/share**: Worst case per contract = $755. With 6 contracts = $4,530 total.
+- **SIZE line**: The system calculated 6 contracts because 5% of a $100k portfolio ($5,000) ÷ $755 max loss per contract ≈ 6.
+- **MANAGE line**: This tells you exactly when to close the trade and what your profit target is in dollars.
 
 ---
 

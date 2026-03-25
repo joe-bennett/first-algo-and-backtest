@@ -24,9 +24,11 @@ class IronCondorScanner(BaseStrategy):
         """
         data expects:
             "tickers": list of tickers to screen
+            "portfolio_value": float — used to calculate contract count
         """
         cfg = self.config["iron_condor"]
         tickers = data.get("tickers", [])
+        portfolio_value = data.get("portfolio_value", cfg.get("default_portfolio_value", 100000))
         rows = []
 
         for ticker in tickers:
@@ -90,10 +92,21 @@ class IronCondorScanner(BaseStrategy):
                 short_call_mid = (short_call["bid"].iloc[0] + short_call["ask"].iloc[0]) / 2
                 short_put_mid = (short_put["bid"].iloc[0] + short_put["ask"].iloc[0]) / 2
 
+                est_credit = round(short_call_mid + short_put_mid, 2)
+                max_loss_per_share = round(wing_width - est_credit, 2)
+                max_loss_per_contract = max_loss_per_share * 100  # 100 shares per contract
+
+                # Size: reserve per_condor_pct of portfolio as margin
+                margin_budget = portfolio_value * cfg.get("per_condor_pct", 0.05)
+                contracts = max(1, int(margin_budget / max_loss_per_contract)) if max_loss_per_contract > 0 else 1
+                margin_reserved = round(contracts * max_loss_per_contract, 2)
+                max_profit = round(contracts * est_credit * 100, 2)
+                max_loss_total = round(contracts * max_loss_per_contract, 2)
+
                 rows.append({
                     "ticker": ticker,
                     "action": "CONDOR",
-                    "weight": 0.0,
+                    "weight": cfg.get("per_condor_pct", 0.05),
                     "iv_rank": iv_rank,
                     "dte": dte,
                     "expiry": target_expiry.strftime("%Y-%m-%d"),
@@ -102,8 +115,12 @@ class IronCondorScanner(BaseStrategy):
                     "long_call": long_call_strike,
                     "short_put": short_put_strike,
                     "long_put": long_put_strike,
-                    "est_credit": round(short_call_mid + short_put_mid, 2),
-                    "max_loss": round(wing_width - short_call_mid - short_put_mid, 2),
+                    "est_credit": est_credit,
+                    "max_loss": max_loss_per_share,
+                    "contracts": contracts,
+                    "margin_reserved": margin_reserved,
+                    "max_profit": max_profit,
+                    "max_loss_total": max_loss_total,
                 })
             except Exception:
                 continue
@@ -122,7 +139,12 @@ class IronCondorScanner(BaseStrategy):
         credit = signal_row["est_credit"]
         max_loss = signal_row["max_loss"]
         iv_rank = signal_row["iv_rank"]
-        profit_target = round(credit * self.config["iron_condor"]["profit_target_pct"], 2)
+        contracts = int(signal_row["contracts"])
+        margin_reserved = signal_row["margin_reserved"]
+        max_profit = signal_row["max_profit"]
+        max_loss_total = signal_row["max_loss_total"]
+        profit_target_credit = round(credit * self.config["iron_condor"]["profit_target_pct"], 2)
+        profit_target_dollars = round(max_profit * self.config["iron_condor"]["profit_target_pct"], 2)
 
         return (
             f"IRON CONDOR OPPORTUNITY: {t}\n"
@@ -130,8 +152,12 @@ class IronCondorScanner(BaseStrategy):
             f"  Expiry: {expiry} ({dte} DTE)\n"
             f"  Structure:\n"
             f"    Buy  {lp}P / Sell {sp}P — Sell {sc}C / Buy {lc}C\n"
-            f"  Est. credit: ${credit:.2f} | Max loss: ${max_loss:.2f}\n"
+            f"  Credit: ${credit:.2f}/share | Max loss: ${max_loss:.2f}/share\n"
+            f"  SIZE: {contracts} contract{'s' if contracts != 1 else ''} "
+            f"| Margin reserved: ${margin_reserved:,.2f} | Max profit: ${max_profit:,.2f} | Max loss: ${max_loss_total:,.2f}\n"
             f"  WHY: IV Rank {iv_rank:.0f} (>=50) means elevated premium — good time to sell volatility.\n"
-            f"  HOW: Sell the condor as a single 4-leg order at midpoint (${credit:.2f} credit target).\n"
-            f"  MANAGE: Close at 50% profit (${profit_target:.2f} credit remaining) or at {self.config['iron_condor']['exit_dte']} DTE."
+            f"  HOW: Sell {contracts} condor{'s' if contracts != 1 else ''} as a single 4-leg order "
+            f"at midpoint (${credit:.2f} credit target per contract).\n"
+            f"  MANAGE: Close at 50% profit (~${profit_target_dollars:,.2f} gain) "
+            f"or at {self.config['iron_condor']['exit_dte']} DTE."
         )

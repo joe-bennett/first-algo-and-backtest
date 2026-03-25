@@ -39,19 +39,3 @@ def send_alert(subject: str, body: str) -> None:
         server.sendmail(gmail_user, to_address, msg.as_string())
 
     print(f"Email sent to {to_address} — Subject: {subject}")
-
-
-# Backwards-compatible alias (engine.py calls send_sms)
-def send_sms(body: str) -> str:
-    subject = _extract_subject(body)
-    send_alert(subject, body)
-    return "email_sent"
-
-
-def _extract_subject(body: str) -> str:
-    """Use the first non-empty line of the body as the email subject."""
-    for line in body.splitlines():
-        line = line.strip("= \t")
-        if line:
-            return line[:80]
-    return "Portfolio Alert"
