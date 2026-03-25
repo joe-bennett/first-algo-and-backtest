@@ -10,6 +10,7 @@ Screens for candidates where:
 Returns suggested condor structures with email-ready descriptions.
 """
 
+import time
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
@@ -31,7 +32,9 @@ class IronCondorScanner(BaseStrategy):
         portfolio_value = data.get("portfolio_value", cfg.get("default_portfolio_value", 100000))
         rows = []
 
-        for ticker in tickers:
+        for i, ticker in enumerate(tickers):
+            if i > 0:
+                time.sleep(2)  # avoid Yahoo Finance rate limits between tickers
             try:
                 iv_rank = get_iv_rank(ticker)
                 if iv_rank is None or iv_rank < cfg["min_iv_rank"]:

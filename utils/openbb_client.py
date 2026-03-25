@@ -131,10 +131,21 @@ def _fetch_nasdaq_ftp(cfg: dict) -> list[str]:
             df = pd.read_csv(io.StringIO(resp.text), sep="|")
             df = df[df["Symbol"].notna()]
             df = df[~df["Symbol"].str.contains(r"[$^]", regex=True)]  # remove test symbols
+            df = df[~df["Symbol"].str.startswith("$", na=False)]      # remove any remaining $ prefixes
+
+            # Remove test issues
+            if "Test Issue" in df.columns:
+                df = df[df["Test Issue"] != "Y"]
 
             # Drop ETFs if not wanted
             if not include_etfs and "ETF" in df.columns:
                 df = df[df["ETF"] != "Y"]
+
+            # Drop warrants, units, and rights by security name
+            if "Security Name" in df.columns:
+                junk_pattern = r"\b(warrant|unit|right)s?\b"
+                mask = df["Security Name"].str.lower().str.contains(junk_pattern, regex=True, na=False)
+                df = df[~mask]
 
             # Drop SPACs (common patterns in name)
             if not include_spacs and "Security Name" in df.columns:
@@ -401,18 +412,30 @@ def get_fundamentals(
 # Options data (for iron condor screening)
 # =============================================================================
 
-def get_options_chain(ticker: str, expiry: str | None = None) -> pd.DataFrame:
-    """Returns options chain for a ticker."""
-    try:
-        result = obb.derivatives.options.chains(
-            symbol=ticker,
-            provider="yfinance",
-            expiration=expiry,
-        )
-        return result.to_df()
-    except Exception as e:
-        logger.warning(f"Could not fetch options for {ticker}: {e}")
-        return pd.DataFrame()
+def get_options_chain(ticker: str, expiry: str | None = None, retries: int = 3) -> pd.DataFrame:
+    """
+    Returns options chain for a ticker.
+    Retries up to `retries` times on rate-limit errors, with increasing delays.
+    """
+    for attempt in range(retries):
+        try:
+            result = obb.derivatives.options.chains(
+                symbol=ticker,
+                provider="yfinance",
+                expiration=expiry,
+            )
+            return result.to_df()
+        except Exception as e:
+            err = str(e).lower()
+            if any(kw in err for kw in ("rate", "too many", "429", "limit")):
+                wait = 10 * (attempt + 1)  # 10s, 20s, 30s
+                logger.warning(f"Rate limited fetching options for {ticker} — waiting {wait}s (attempt {attempt+1}/{retries})")
+                time.sleep(wait)
+            else:
+                logger.warning(f"Could not fetch options for {ticker}: {e}")
+                return pd.DataFrame()
+    logger.warning(f"Could not fetch options for {ticker} after {retries} attempts.")
+    return pd.DataFrame()
 
 
 def get_iv_rank(ticker: str, lookback_days: int = 252) -> float | None:
