@@ -62,7 +62,7 @@ Start with manual execution on alerts, evolve toward live automated trading.
   - utils/: openbb_client.py (data fetching), metrics.py (performance metrics)
   - strategies/: base.py, value_momentum_120_20.py, iron_condor.py
   - backtesting/: runner.py (VectorBT-based)
-  - alerts/: engine.py, notifier.py (Twilio SMS)
+  - alerts/: engine.py, notifier.py (Gmail email via smtplib)
   - dashboard/: app.py (Streamlit, 4 pages), charts.py (Plotly)
   - quickstart.py (sanity check script)
   - GUIDE.md (plain English user guide)
@@ -104,6 +104,42 @@ Start with manual execution on alerts, evolve toward live automated trading.
 - Added README.md with quick start, analysis guide, and portfolio configuration instructions
 - Updated GUIDE.md: replaced all SMS/Twilio references with Gmail email throughout
 
+### 2026-03-25 (continued, session 3)
+- Connected Portfolio Overview dashboard page to live Alpaca data
+  - dashboard/app.py: replaced placeholder with live account metrics, position tables, weight/P&L charts
+  - dashboard/charts.py: added holdings_weight_bar() and holdings_pl_bar() chart functions
+  - Refresh button pulls latest positions from Alpaca on demand; auto-fetches on first load
+  - Graceful fallback to config display if Alpaca is unreachable
+- Fixed multiple backtesting bugs in runner.py:
+  - prices.index not cast to DatetimeIndex → resample("MS") crashed with TypeError
+  - size_matrix initialized to 0.0 instead of NaN → VectorBT sold all positions every non-rebalance day, causing -115 Sharpe
+  - portfolio.returns() returns per-asset DataFrame for multi-asset portfolio → switched to portfolio.value().pct_change()
+  - portfolio.plot() fails on multi-asset portfolio → replaced with manual Plotly equity curve
+  - VectorBT running N independent $100k portfolios instead of one shared portfolio → added group_by=True, cash_sharing=True
+  - SPY not in strategy universe → benchmark fell back to random ticker; fixed to always fetch SPY separately
+  - Momentum calculation inverted (prices.iloc[-252]/prices.iloc[-21] instead of iloc[-21]/iloc[-252]) → was buying losers, shorting winners
+- Fixed survivorship bias in backtesting
+  - Previously used today's S&P 500 list for all historical dates — only included companies that survived to 2024
+  - Added get_sp500_members_at(date) to openbb_client.py using fja05680/sp500 GitHub dataset
+  - Dataset: daily S&P 500 snapshots from 1996 to present, downloaded once to data/sp500_historical_members.csv
+  - runner.py now builds union of all members over the backtest window, fetches prices for all of them
+  - At each rebalance date, only stocks actually in the S&P 500 on that date are eligible for ranking
+  - Added `start-dashboard` PowerShell shortcut for launching dashboard from any terminal
+
+### 2026-03-25 (continued, session 2)
+- Fixed look-ahead bias in backtesting: replaced current-snapshot fundamentals with point-in-time data
+  - Built utils/simfin_client.py: downloads SimFin quarterly financials, computes TTM P/E, P/B, FCF Yield, EV/EBITDA using each filing's Publish Date as the availability cutoff
+  - Panel covers 3,600 US tickers, 49,000+ quarterly data points, 2007–present
+  - Cached to data/simfin/pit_fundamentals.pkl; auto-refreshes every 7 days
+  - backtesting/runner.py updated: calls build_fundamentals_panel() once per session, then get_pit_fundamentals(panel, rdate, tickers) on each rebalance date
+  - Removed stale get_fundamentals import from runner.py
+  - Added simfin>=0.9.0 to requirements.txt; SIMFIN_API_KEY to .env.example
+- Fixed iron condor / 120/20 strategy conflict
+  - Condor scanner now excludes tickers currently held in the 120/20 equity book
+  - alerts/engine.py: added _get_held_tickers() — reads live Alpaca positions, falls back to data/last_signals.json
+  - Prevents selling volatility on stocks held as directional longs or shorts
+- Updated README.md and GUIDE.md with SimFin setup, PIT fundamentals explanation, condor exclusion logic, and revised file maps
+
 ### 2026-03-25 (continued)
 - Added iron condor contract sizing based on portfolio value
   - portfolio.yaml: per_condor_pct (5%), max_total_pct (15%), default_portfolio_value
@@ -117,3 +153,68 @@ Start with manual execution on alerts, evolve toward live automated trading.
   - Columns: ticker, side, qty, entry price, current price, value, P&L, weight, stop-loss
   - Auto-updates: daily price refresh, post-rebalance, post-stop-loss replacement
 - Fixed all stale SMS/Twilio references in code comments and docstrings
+
+### 2026-03-25 (continued, session 3)
+- Implemented four strategy improvements for better backtest accuracy and realism:
+  1. **Quality factor** — added ROE, net margin, debt/equity to SimFin panel
+     - simfin_client.py: added ttm_revenue, roe, net_margin, debt_equity columns
+     - Cache version bumped to pit_fundamentals_v2.pkl (forces one-time rebuild)
+     - portfolio.yaml: added quality_factors section (ROE 40%, net margin 40%, D/E 20%)
+     - Score blend updated to 34% value / 33% momentum / 33% quality
+  2. **Sector neutralization** — ranks stocks within GICS sector rather than globally
+     - openbb_client.py: added get_sector_map() from Wikipedia, cached 24 hours
+     - Prevents portfolio from concentrating in a single cheap sector
+     - Controlled by sector_neutral: true in portfolio.yaml (default on)
+  3. **Short book toggle** — enable_short_book: true in portfolio.yaml
+     - When false, runs 100% long with no shorting
+     - Portfolio exposure changes from 120/20 to 100/0 when disabled
+  4. **Momentum robustness** — replaced single-day price lookups with 5-day averages
+     - Uses average of days -23 to -18 (recent) and -254 to -249 (year-ago)
+     - Prevents a single volatile day from distorting the 12-month signal
+- Updated all callers (runner.py, engine.py, dashboard/app.py, sandbox) to pass sectors dict
+- Dashboard Backtest page now has separate value/momentum/quality weight sliders plus short book
+  and sector neutralization toggles
+- Dashboard Research Sandbox shows quality_score, roe, net_margin, sector columns in results
+
+### 2026-03-25 (continued, session 4)
+- Expanded universe to S&P 1500 (was S&P 500)
+  - universe.yaml: preset changed from "all_us" to "sp1500"
+  - openbb_client.py: added get_sp1500_members_at(date), _get_midsmall_tickers(), get_index_members_at(date, universe)
+  - S&P 500 component: accurate point-in-time via fja05680 dataset
+  - S&P 400/600 component: current Wikipedia list (no free historical dataset — modest survivorship bias)
+  - runner.py reads universe.yaml at runtime, passes preset to get_index_members_at()
+- Switched rebalance frequency from monthly to quarterly
+  - portfolio.yaml: rebalance_frequency changed to "quarterly"
+  - Reduces transaction costs ~75% — largest single drag on backtest performance
+  - Dashboard Backtest page defaults still allow override via dropdown
+
+### 2026-03-26
+- Reverted universe from S&P 1500 back to S&P 500
+  - universe.yaml: preset changed from "sp1500" back to "sp500"
+  - Rationale: S&P 400/600 uses current-membership Wikipedia list (no free historical dataset),
+    introducing survivorship bias on mid/small caps; S&P 500 uses fully accurate fja05680 point-in-time data
+  - Practical benefit: large-cap shorts are more shortable (better borrow availability, lower fees);
+    S&P 1500 backtest returns overstated because borrow costs on small caps are not modeled
+  - Short book still has ~100 candidates (bottom 20% of ~500 stocks) — sufficient for the strategy
+  - sp1500 preset remains available in code if needed in future
+  - Updated: quickstart.py comment, GUIDE.md universe section and survivorship bias section
+- Fixed quality factors missing from live signal scanner
+  - Root cause: get_fundamentals() used obb.equity.fundamental.metrics() which doesn't expose
+    ROE, net_margin, or debt_equity — quality score was 0.00 for all stocks
+  - Fix: switched to yf.Ticker(ticker).info directly, pulling all 8 fields in one call:
+    pe_ratio (trailingPE), pb_ratio (priceToBook), fcf_yield (freeCashflow/marketCap),
+    ev_ebitda (enterpriseToEbitda), roe (returnOnEquity), net_margin (profitMargins),
+    debt_equity (debtToEquity/100)
+  - Cache key bumped to fundamentals_v2_ to force one-time rebuild
+- Fixed Alpaca order placement for fractional shares and shorts
+  - Root cause 1: OTO stop-loss with GTC fails for fractional buys ("fractional orders must be DAY")
+  - Root cause 2: Fractional short sells not supported ("fractional orders cannot be sold short")
+  - Fix: long buys use DAY (fractional OK); stop-loss placed as separate GTC StopOrderRequest
+    using math.floor(qty) whole shares so stop never exceeds actual position size
+  - Fix: short sells round to max(1, round(qty)) whole shares, DAY
+  - Added StopOrderRequest to alpaca.py imports
+- Placed initial paper portfolio in Alpaca
+  - 100 long positions (fractional, 1.2% each = 120% long exposure)
+  - 100 GTC stop-loss orders on all longs (15% below entry, whole shares)
+  - 100 short positions (whole shares, 0.2% each = 20% short exposure)
+  - Portfolio value at open: $99,911.78 (-0.09% from $100k cash)

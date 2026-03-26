@@ -25,8 +25,11 @@ ALERT_TO_EMAIL=you@gmail.com
 ALPACA_API_KEY=your_key
 ALPACA_SECRET_KEY=your_secret
 ALPACA_BASE_URL=https://paper-api.alpaca.markets
+SIMFIN_API_KEY=your_simfin_key
 ```
 To generate a Gmail App Password: Google Account → Security → 2-Step Verification → App passwords.
+
+To get a SimFin API key: simfin.com → Free Plan → Get API Key (free, no credit card).
 
 ### 3. Verify the install
 ```bash
@@ -51,6 +54,17 @@ Open the dashboard and go to the **Backtest** page. Set a date range, click **Ru
 - Summary metrics table (annualized return, max drawdown, Sharpe, Sortino)
 
 Run multiple configurations back to back — results stack up in a comparison table at the bottom so you can see them side by side.
+
+Backtests use **point-in-time fundamentals** via SimFin — P/E, P/B, FCF Yield, EV/EBITDA, ROE, net margin, and debt/equity are pulled from the actual quarterly filing available on each rebalance date, not today's snapshot. This eliminates look-ahead bias in the value and quality scores.
+
+Backtests also use **point-in-time index membership** — at each rebalance date, only stocks that were actually in the S&P 500 on that date are eligible. This eliminates survivorship bias (the distortion from only including companies that survived to today).
+
+The strategy scores each stock on three factors:
+- **Value** (34%): P/E, P/B, FCF yield, EV/EBITDA — cheaper is better
+- **Momentum** (33%): 12-month price return skipping the last month — uses 5-day averages at reference points to reduce single-day noise
+- **Quality** (33%): ROE, net profit margin, debt/equity — profitable, low-leverage companies score higher
+
+With **sector neutralization** enabled (default), each factor is ranked within GICS sector. This prevents the portfolio from concentrating in a single sector (e.g., buying only cheap energy stocks when energy is out of favor).
 
 You can also run backtests directly from Python for more control:
 ```python
@@ -97,11 +111,22 @@ print_ledger()  # formatted table in the terminal
 
 All tunable parameters live in **`config/portfolio.yaml`** — open it in any text editor. No code changes needed.
 
-### Change value vs. momentum blend
+### Change value / momentum / quality blend
 ```yaml
 score_blend:
-  value_weight: 0.50      # increase for more value tilt
-  momentum_weight: 0.50   # increase for more momentum tilt
+  value_weight:    0.34   # increase for more value tilt
+  momentum_weight: 0.33   # increase for more momentum tilt
+  quality_weight:  0.33   # increase for more quality tilt (must sum to 1.0)
+```
+
+### Disable sector neutralization (rank globally instead of within sector)
+```yaml
+sector_neutral: false
+```
+
+### Run long-only (no short book)
+```yaml
+enable_short_book: false  # runs 100% long, 0% short
 ```
 
 ### Change rebalance frequency
@@ -128,6 +153,8 @@ risk:
 iron_condor:
   min_iv_rank: 50    # raise to 60+ to only trade in the highest IV environments
 ```
+
+**Note:** The condor scanner automatically excludes any ticker currently held in the 120/20 equity book. A condor bets on range-bound price action, which contradicts holding the same stock as a directional long or short position.
 
 ### Change which stocks are in the universe
 Edit **`config/universe.yaml`**:
@@ -170,12 +197,16 @@ broker/
   position_manager.py ← daily stop-loss replacement logic
   ledger.py          ← local portfolio ledger (writes data/ledger.csv + data/ledger.json)
 dashboard/           ← Streamlit app
-utils/               ← data fetching and performance metrics
+utils/
+  openbb_client.py   ← price, fundamentals, and options data (live signals)
+  simfin_client.py   ← point-in-time fundamentals for backtesting (SimFin)
+  metrics.py         ← performance calculations
 
 data/                ← runtime files (gitignored)
   ledger.csv         ← current holdings — open in Excel
   ledger.json        ← same data in JSON for dashboard/code use
   last_signals.json  ← last rebalance signals, used for stop-loss detection
+  simfin/            ← cached SimFin datasets (~450MB, auto-refreshes every 7 days)
 ```
 
 ---

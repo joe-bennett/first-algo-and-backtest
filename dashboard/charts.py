@@ -88,6 +88,56 @@ def exposure_pie(signals: pd.DataFrame) -> go.Figure:
     return fig
 
 
+def holdings_weight_bar(positions: list[dict]) -> go.Figure:
+    """Horizontal bar chart of portfolio weight by position."""
+    df = pd.DataFrame(positions)
+    if df.empty:
+        return go.Figure()
+    df = df.sort_values("portfolio_weight_pct", ascending=True)
+    colors = ["#F44336" if s == "short" else "#4CAF50" for s in df["side"]]
+    fig = go.Figure(go.Bar(
+        x=df["portfolio_weight_pct"],
+        y=df["ticker"],
+        orientation="h",
+        marker_color=colors,
+        text=df["portfolio_weight_pct"].map("{:.1f}%".format),
+        textposition="outside",
+    ))
+    fig.update_layout(
+        title="Portfolio Weight by Position",
+        xaxis_title="Weight (%)",
+        template="plotly_dark",
+        height=max(300, len(df) * 22),
+        margin=dict(l=60, r=60, t=40, b=40),
+    )
+    return fig
+
+
+def holdings_pl_bar(positions: list[dict]) -> go.Figure:
+    """Bar chart of unrealized P&L by position."""
+    df = pd.DataFrame(positions)
+    if df.empty:
+        return go.Figure()
+    df = df.sort_values("unrealized_pl", ascending=True)
+    colors = ["#F44336" if v < 0 else "#4CAF50" for v in df["unrealized_pl"]]
+    fig = go.Figure(go.Bar(
+        x=df["unrealized_pl"],
+        y=df["ticker"],
+        orientation="h",
+        marker_color=colors,
+        text=df["unrealized_pl"].map("${:+,.0f}".format),
+        textposition="outside",
+    ))
+    fig.update_layout(
+        title="Unrealized P&L by Position",
+        xaxis_title="Unrealized P&L ($)",
+        template="plotly_dark",
+        height=max(300, len(df) * 22),
+        margin=dict(l=60, r=60, t=40, b=40),
+    )
+    return fig
+
+
 def metrics_table(metrics_dict: dict) -> go.Figure:
     """Render a clean metrics comparison table."""
     strat = metrics_dict.get("strategy", {})

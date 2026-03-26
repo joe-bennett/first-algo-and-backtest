@@ -6,7 +6,7 @@
 
 # --- Choose your universe ---
 # Options: "all_us" | "sp500" | "sp1500" | "nasdaq100" | "custom"
-preset: "all_us"
+preset: "sp500"
 
 # --- Preset definitions (sources, no API key needed) ---
 presets:

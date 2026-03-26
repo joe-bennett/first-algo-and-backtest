@@ -13,7 +13,7 @@ import yaml
 from pathlib import Path
 from dotenv import load_dotenv
 from alpaca.trading.client import TradingClient
-from alpaca.trading.requests import MarketOrderRequest, GetOrdersRequest, TakeProfitRequest, StopLossRequest
+from alpaca.trading.requests import MarketOrderRequest, StopOrderRequest, GetOrdersRequest, TakeProfitRequest, StopLossRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus, OrderClass
 
 load_dotenv(Path(__file__).parent.parent / ".env")
@@ -69,37 +69,55 @@ def get_positions() -> dict[str, dict]:
 
 def place_order(ticker: str, qty: float, side: str, price: float | None = None, reason: str = "") -> dict:
     """
-    Place a market order. For long buys, attaches a stop-loss if configured in portfolio.yaml.
+    Place a market order. For long buys, attaches a GTC stop-loss using whole shares.
     side: 'buy' or 'sell'
-    qty: number of shares (fractional supported on paper)
+    qty: number of shares (fractional for longs, rounded to whole shares for shorts)
     price: current price — required to calculate stop price for longs
     """
+    import math
     client = get_client()
     order_side = OrderSide.BUY if side == "buy" else OrderSide.SELL
     stop_loss_pct = _get_stop_loss_pct()
 
-    # Attach stop-loss to long buys when price and stop_loss_pct are available
-    if side == "buy" and price and stop_loss_pct:
-        stop_price = round(price * (1 - stop_loss_pct), 2)
-        req = MarketOrderRequest(
-            symbol=ticker,
-            qty=round(qty, 4),
-            side=order_side,
-            time_in_force=TimeInForce.GTC,
-            order_class=OrderClass.OTO,
-            stop_loss=StopLossRequest(stop_price=stop_price),
-        )
-        print(f"  Order placed: BUY {qty:.4f} {ticker} | stop-loss @ ${stop_price:.2f} ({stop_loss_pct*100:.0f}%) | {reason}")
-    else:
+    if side == "buy":
+        # Long buys: fractional OK, DAY required; attach separate GTC stop using whole shares
         req = MarketOrderRequest(
             symbol=ticker,
             qty=round(qty, 4),
             side=order_side,
             time_in_force=TimeInForce.DAY,
         )
-        print(f"  Order placed: {side.upper()} {qty:.4f} {ticker} | {reason}")
+        order = client.submit_order(req)
 
-    order = client.submit_order(req)
+        if price and stop_loss_pct:
+            stop_price = round(price * (1 - stop_loss_pct), 2)
+            whole_qty = max(1, math.floor(qty))  # floor so stop never exceeds position size
+            try:
+                stop_req = StopOrderRequest(
+                    symbol=ticker,
+                    qty=whole_qty,
+                    side=OrderSide.SELL,
+                    time_in_force=TimeInForce.GTC,
+                    stop_price=stop_price,
+                )
+                client.submit_order(stop_req)
+                print(f"  Order placed: BUY {qty:.4f} {ticker} | stop-loss @ ${stop_price:.2f} ({stop_loss_pct*100:.0f}%) | {reason}")
+            except Exception as e:
+                print(f"  Order placed: BUY {qty:.4f} {ticker} | stop-loss failed ({e}) | {reason}")
+        else:
+            print(f"  Order placed: BUY {qty:.4f} {ticker} | {reason}")
+    else:
+        # Short sells: Alpaca does not support fractional shorts — round up to whole shares
+        whole_qty = max(1, round(qty))
+        req = MarketOrderRequest(
+            symbol=ticker,
+            qty=whole_qty,
+            side=order_side,
+            time_in_force=TimeInForce.DAY,
+        )
+        order = client.submit_order(req)
+        print(f"  Order placed: SHORT {whole_qty} {ticker} | {reason}")
+
     return {"id": str(order.id), "ticker": ticker, "side": side, "qty": qty}
 
 

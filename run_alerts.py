@@ -1,7 +1,7 @@
 """
 Scheduled alert runner — called by Windows Task Scheduler.
-  - Daily (weekdays 4:30 PM):  Iron Condor scan
-  - Monthly (1st of month):    120/20 Value-Momentum equity scan + portfolio rebalance
+  - Daily (weekdays 4:30 PM):    Iron Condor scan + stop-loss replacement check
+  - Quarterly (1st of Jan/Apr/Jul/Oct): 120/20 Value-Momentum equity scan + portfolio rebalance
 
 Logs output to logs/alerts.log
 """
@@ -58,10 +58,10 @@ def main():
     except Exception as e:
         logging.error(f"Condor scan failed: {e}")
 
-    # --- Equity scan + rebalance: runs on the 1st of each month ---
-    if today.day == 1:
+    # --- Equity scan + rebalance: runs quarterly (1st of Jan, Apr, Jul, Oct) ---
+    if today.day == 1 and today.month in (1, 4, 7, 10):
         try:
-            logging.info("Running equity scan (monthly)...")
+            logging.info("Running equity scan (quarterly)...")
             signals = run_equity_scan(dry_run=False)
             logging.info("Equity scan complete.")
 
@@ -71,7 +71,7 @@ def main():
                 orders = rebalance(signals, dry_run=False)
                 save_signals(signals)
                 save_ledger()
-                logging.info(f"Rebalance complete: {len(orders)} orders placed.")
+                logging.info(f"Quarterly rebalance complete: {len(orders)} orders placed.")
 
                 # Send summary email
                 date_str = today.strftime("%Y-%m-%d")
@@ -86,7 +86,7 @@ def main():
         except Exception as e:
             logging.error(f"Equity scan/rebalance failed: {e}")
     else:
-        logging.info(f"Equity scan skipped (day {today.day}, runs on day 1).")
+        logging.info(f"Equity scan skipped (runs quarterly on day 1 of Jan/Apr/Jul/Oct, today is {today.strftime('%Y-%m-%d')}).")
 
     logging.info("=== Alert runner finished ===")
 

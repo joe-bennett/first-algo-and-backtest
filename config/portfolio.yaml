@@ -3,7 +3,7 @@
 
 strategy:
   name: "120/20 Value Momentum"
-  rebalance_frequency: "monthly"     # monthly | quarterly
+  rebalance_frequency: "quarterly"    # monthly | quarterly
   long_weight: 1.20                  # 120% long exposure
   short_weight: 0.20                 # 20% short exposure
   long_pct: 0.20                     # top 20% of ranked stocks = long book
@@ -19,10 +19,25 @@ value_factors:
 momentum_factors:
   momentum_12_1: 1.0    # 12-month return skipping last month (100% weight for now)
 
-# Blend between value and momentum composite scores
+quality_factors:
+  roe: 0.40             # Return on Equity — higher = better quality
+  net_margin: 0.40      # Net profit margin — higher = better quality
+  debt_equity: 0.20     # Debt/Equity ratio — lower = better quality (inverted when scoring)
+
+# Blend between value, momentum, and quality composite scores (must sum to 1.0)
 score_blend:
-  value_weight: 0.50
-  momentum_weight: 0.50
+  value_weight: 0.40
+  momentum_weight: 0.40
+  quality_weight: 0.20
+
+# Short book toggle — set to false to run long-only (100% long, no shorting)
+enable_short_book: true
+
+# Sector neutralization — rank stocks within GICS sector rather than globally
+# OFF by default: sector neutral kills the value signal by forcing one stock per sector
+# regardless of how cheap or expensive sectors are relative to each other.
+# Turn ON only if you want a sector-balanced factor portfolio (e.g. for risk control).
+sector_neutral: false
 
 # Risk controls
 risk:

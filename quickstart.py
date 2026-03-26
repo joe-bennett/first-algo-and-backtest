@@ -16,10 +16,11 @@ def check_step(name):
 
 check_step("1. Fetching universe (uses preset in config/universe.yaml)")
 from utils.openbb_client import get_universe_tickers, get_sp500_tickers
-# Use S&P 500 for the quick sanity check (fast); real runs use whatever preset is configured
-tickers = get_sp500_tickers()
-print(f"  Found {len(tickers)} tickers. First 5: {tickers[:5]}")
-print(f"  (Full universe via get_universe_tickers() uses the preset in config/universe.yaml)")
+# Use S&P 500 for the quick sanity check (fast); real runs use the full configured universe
+tickers_sample = get_sp500_tickers()
+print(f"  S&P 500 sample: {len(tickers_sample)} tickers. First 5: {tickers_sample[:5]}")
+tickers = tickers_sample  # use this subset for speed in the remaining steps
+print(f"  (Live runs use the full preset configured in config/universe.yaml — currently sp500)")
 
 check_step("2. Fetching price history (10 tickers, 1 year)")
 from utils.openbb_client import get_price_history
@@ -46,7 +47,8 @@ with open("config/portfolio.yaml", encoding="utf-8") as f:
     cfg = yaml.safe_load(f)
 
 strategy = ValueMomentum12020(cfg)
-signals = strategy.generate_signals({"prices": prices_full, "fundamentals": fundamentals_full})
+# sectors dict left empty here for speed; sector_neutral uses Wikipedia and is tested separately
+signals = strategy.generate_signals({"prices": prices_full, "fundamentals": fundamentals_full, "sectors": {}})
 print(f"  Signals generated: {len(signals)} ({len(signals[signals.action=='BUY'])} long, {len(signals[signals.action=='SHORT'])} short)")
 
 print("\n" + "="*50)

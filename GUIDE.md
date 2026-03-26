@@ -72,8 +72,8 @@ while manually executing the same trades on your live broker to get comfortable.
 If your account is under **$25,000**, US brokers restrict you to 3 "day trades"
 (buy and sell the same stock same day) within a 5-day rolling window.
 
-With monthly rebalancing this is not a significant issue — you're not day trading.
-But it's worth knowing. If you plan to start with less than $25,000, use monthly
+With quarterly rebalancing this is not a significant issue — you're not day trading.
+But it's worth knowing. If you plan to start with less than $25,000, use quarterly
 rebalancing (already the default) and avoid same-day round trips.
 
 ---
@@ -153,7 +153,7 @@ LONG MSFT @ 1.2% of portfolio
 ```
 If your portfolio is $50,000 → buy $600 worth of MSFT at market open next morning.
 Do this for each position in the signal list. Set a calendar reminder for the next
-rebalance date (monthly or quarterly depending on your config).
+rebalance date (quarterly by default — 1st of January, April, July, October).
 
 **Step 8 — On rebalance day**
 The system sends you a new signal list. Compare it to what you currently hold:
@@ -186,13 +186,19 @@ Streamlit for the dashboard, etc.).
 
 ### Step 3 — Set up your credentials
 1. Copy `.env.example` and rename the copy to `.env`
-2. Open `.env` and fill in your Gmail values:
+2. Open `.env` and fill in your values:
 ```
-GMAIL_ADDRESS=you@gmail.com           ← the Gmail account sending alerts
+GMAIL_ADDRESS=you@gmail.com             ← the Gmail account sending alerts
 GMAIL_APP_PASSWORD=xxxx xxxx xxxx xxxx  ← your 16-character App Password
-ALERT_TO_EMAIL=you@gmail.com          ← where to send the alerts (can be the same address)
+ALERT_TO_EMAIL=you@gmail.com            ← where to send the alerts (can be the same address)
+ALPACA_API_KEY=your_key                 ← from alpaca.markets (free paper trading account)
+ALPACA_SECRET_KEY=your_secret
+ALPACA_BASE_URL=https://paper-api.alpaca.markets
+SIMFIN_API_KEY=your_simfin_key          ← from simfin.com → Free Plan → Get API Key
 ```
 **Never share or commit the `.env` file. It contains your private keys.**
+
+The SimFin key is required for backtesting with accurate historical fundamentals. The first backtest run downloads ~450MB of data to `data/simfin/` — this takes a few minutes once, then loads from cache in seconds.
 
 ### Step 4 — Verify everything works
 ```
@@ -219,8 +225,9 @@ Or use the **Signals** page in the dashboard — check "Dry run" first to previe
 without actually sending a message.
 
 ### Schedule it to run automatically
-You can use Windows Task Scheduler to run `python alerts/engine.py` every weekday
-after market close (e.g., 4:30 PM ET). Ask Claude to help set this up when ready.
+Windows Task Scheduler is already configured to run `run_alerts.py` every weekday
+at 4:30 PM ET (task name: `TradingAlerts`). This handles both the daily condor scan
+and the quarterly rebalance (fires on the 1st of January, April, July, October).
 
 ---
 
@@ -264,7 +271,7 @@ Open it in any text editor. The key sections:
 ### Rebalance frequency
 ```yaml
 strategy:
-  rebalance_frequency: "monthly"    ← change to "quarterly" to rebalance less often
+  rebalance_frequency: "quarterly"  ← change to "monthly" to rebalance more often (higher cost)
 ```
 
 ### Long/short book size
@@ -276,13 +283,15 @@ strategy:
 Increasing `long_pct` to 0.30 means you hold more stocks in the long book (more diversified,
 lower individual stock risk, but potentially weaker returns).
 
-### Value vs. momentum blend
+### Value / momentum / quality blend
 ```yaml
 score_blend:
-  value_weight: 0.50      ← 50% of final score comes from value factors
-  momentum_weight: 0.50   ← 50% comes from momentum
+  value_weight:    0.34   ← 34% of the final score comes from value factors
+  momentum_weight: 0.33   ← 33% comes from momentum
+  quality_weight:  0.33   ← 33% comes from quality factors (ROE, margin, debt)
 ```
-If you want a pure momentum strategy, set `value_weight: 0.0` and `momentum_weight: 1.0`.
+The three weights must add up to 1.0. If you want a pure momentum strategy, set
+`value_weight: 0.0`, `quality_weight: 0.0`, and `momentum_weight: 1.0`.
 Always run a backtest after changing this to see the impact.
 
 ### Value factor weights
@@ -295,6 +304,33 @@ value_factors:
 ```
 These must add up to 1.0. If you don't trust EV/EBITDA data quality, you could
 set it to 0.0 and redistribute weight to the others.
+
+### Quality factor weights
+```yaml
+quality_factors:
+  roe: 0.40           ← Return on Equity gets 40% of the quality score
+  net_margin: 0.40    ← Net profit margin gets 40%
+  debt_equity: 0.20   ← Debt/Equity gets 20% (lower D/E = higher quality)
+```
+Quality data comes from SimFin (same point-in-time source as value factors).
+Stocks with negative equity or missing data fall back to the median quality score.
+
+### Sector neutralization
+```yaml
+sector_neutral: true   ← rank stocks within their GICS sector (recommended)
+# sector_neutral: false ← rank all stocks globally (may concentrate in one sector)
+```
+When enabled (default), each factor is ranked relative to sector peers. A cheap tech
+stock is ranked against other tech stocks, not against cheap energy stocks. This prevents
+the entire long book from filling up with one sector when it happens to be out of favor.
+
+### Short book toggle
+```yaml
+enable_short_book: true   ← 120% long / 20% short (full strategy)
+# enable_short_book: false ← 100% long, no shorting (long-only version)
+```
+Turn off shorting if your broker doesn't support short selling or if you want to
+reduce risk. The long book is identical either way — only the short positions change.
 
 ### Iron condor thresholds and sizing
 ```yaml
@@ -315,6 +351,8 @@ environments trigger an alert).
 
 **How condor sizing works:** The alert email tells you exactly how many contracts to trade — no math needed. The system reserves `per_condor_pct` (5%) of your portfolio as the margin budget for each condor, then divides by the max loss per contract to arrive at a contract count. The 15% total cap means no more than 3 condors open at once before the scanner stops recommending new ones.
 
+**Condor and 120/20 conflict avoidance:** The condor scanner automatically skips any ticker already held in the 120/20 equity book. A condor profits when a stock stays range-bound — that conflicts with holding it as a directional long or short. When the scanner runs, it reads live positions from Alpaca (or falls back to `data/last_signals.json`) and removes those tickers from consideration before screening.
+
 ### Position size limits
 ```yaml
 risk:
@@ -333,9 +371,9 @@ Go to the Backtest page in the dashboard and run a test to see how it would have
 
 ### Switch universe with one line
 ```yaml
-preset: "all_us"       ← all US-listed stocks (4,000–5,000 after filters)
-# preset: "sp500"      ← S&P 500 only (~500 stocks)
-# preset: "sp1500"     ← S&P 500 + MidCap + SmallCap (~1,500 stocks)
+preset: "sp500"        ← S&P 500 only (~500 stocks) — default, fully point-in-time accurate
+# preset: "sp1500"     ← S&P 500 + MidCap + SmallCap (~1,500 stocks, modest survivorship bias on mid/small)
+# preset: "all_us"     ← all US-listed stocks (4,000–5,000 after filters)
 # preset: "nasdaq100"  ← NASDAQ 100 only
 # preset: "custom"     ← your own list (fill in tickers below)
 ```
@@ -411,6 +449,22 @@ detail:
 
 ## 7. Running a Backtest
 
+### How backtests handle historical fundamentals
+
+Backtests use **point-in-time fundamentals** via SimFin. This matters because value factors (P/E, P/B, FCF Yield, EV/EBITDA) depend on financial statement data — if you used today's numbers for a 2018 backtest, you'd be feeding the model information that didn't exist yet. That's look-ahead bias and it inflates backtest returns.
+
+SimFin stores both the fiscal period end date and the date the filing was made public. The backtest only uses the filing once it was actually public — so a March 31 quarter-end that was filed on May 10 isn't available to the model until May 10.
+
+The first backtest session builds the fundamentals panel from SimFin (~450MB of quarterly data for 3,600 US stocks back to 2007). It caches to `data/simfin/pit_fundamentals.pkl` and auto-refreshes every 7 days.
+
+### How backtests handle survivorship bias
+
+**Survivorship bias** is a common backtest problem: if you use today's S&P 500 list for a historical test, you're only including companies that survived to today. Companies that went bankrupt, were acquired, or were removed from the index are excluded — making historical returns look better than they actually were.
+
+The backtest fixes this using a historical membership dataset (downloaded once to `data/sp500_historical_members.csv`). This gives accurate daily S&P 500 snapshots back to 1996. At each quarterly rebalance date, only stocks that were **actually in the S&P 500 on that specific date** are eligible for ranking — companies that were later removed, went bankrupt, or were acquired are properly excluded from future dates but included in the periods when they were members.
+
+This produces more realistic — and typically lower — backtest returns than naive approaches.
+
 ### From the dashboard (easiest)
 1. Open the dashboard: `streamlit run dashboard/app.py`
 2. Go to the **Backtest** page
@@ -430,7 +484,7 @@ r1 = run_backtest(start="2018-01-01", end="2024-01-01", label="baseline")
 r2 = run_backtest(
     start="2018-01-01",
     end="2024-01-01",
-    config_override={"score_blend": {"value_weight": 0.2, "momentum_weight": 0.8}},
+    config_override={"score_blend": {"value_weight": 0.1, "momentum_weight": 0.8, "quality_weight": 0.1}},
     label="high_momentum",
 )
 
@@ -508,11 +562,13 @@ dashboard/
   charts.py          ← Chart templates (equity curve, drawdown, etc.)
 
 utils/
-  openbb_client.py   ← All data fetching (prices, fundamentals, options)
+  openbb_client.py   ← All live data fetching (prices, fundamentals, options) — used by alerts
+  simfin_client.py   ← Point-in-time historical fundamentals — used only by backtesting
   metrics.py         ← Performance calculations (Sharpe, drawdown, etc.)
 
 data/
   cache/             ← Auto-generated cache files — safe to delete if data seems stale
+  simfin/            ← SimFin datasets (~450MB); auto-refreshes every 7 days
   raw/               ← Downloaded data snapshots
 
 research/
@@ -537,7 +593,7 @@ quickstart.py        ← Sanity check — run this after first install
 ### Phase 2 — Current (paper trading)
 - Alpaca paper trading account connected (free at alpaca.markets)
 - System places simulated trades automatically
-- Monthly rebalance + daily stop-loss replacement run on schedule
+- Quarterly rebalance (Jan/Apr/Jul/Oct) + daily stop-loss replacement run on schedule
 - Validate the system works before going live
 
 ### Phase 3 — Live trading
@@ -564,15 +620,17 @@ Or run `python alerts/engine.py` — it defaults to dry run when run directly.
 
 **Q: What does it mean when a stock has a high value score but low momentum?**
 It means the stock looks cheap on fundamentals (low P/E, low P/B etc.) but has been
-performing poorly recently. A pure value investor might still buy it. With our 50/50 blend,
-it may or may not rank highly enough to make the long book.
+performing poorly recently. A pure value investor might still buy it. With our blended
+approach (34% value / 33% momentum / 33% quality), it may or may not rank highly enough
+to make the long book depending on how it scores on quality.
 
 **Q: How do I change the blend to be all value or all momentum?**
 In `config/portfolio.yaml`:
 ```yaml
 score_blend:
-  value_weight: 1.0      ← pure value
+  value_weight:    1.0   ← pure value
   momentum_weight: 0.0
+  quality_weight:  0.0
 ```
 Then run a backtest to compare vs. the blended version.
 

@@ -3,10 +3,10 @@ Daily position monitor — detects stopped-out positions and replaces them
 with the next-highest ranked stock not already in the portfolio.
 
 Flow:
-  1. Load last saved signals (written at each monthly rebalance)
+  1. Load last saved signals (written at each quarterly rebalance)
   2. Compare expected long positions to actual Alpaca positions
   3. Any expected long that is missing = was stopped out
-  4. Score all S&P 500 stocks, find the next best candidate not already held
+  4. Score the configured universe, find the next best candidate not already held
   5. Buy the replacement at the same portfolio weight
   6. Send email notification
 """
@@ -27,7 +27,7 @@ CONFIG_PATH = Path(__file__).parent.parent / "config" / "portfolio.yaml"
 
 
 def save_signals(signals) -> None:
-    """Persist signals DataFrame after each monthly rebalance."""
+    """Persist signals DataFrame after each quarterly rebalance."""
     records = signals[signals["action"] == "BUY"][["ticker", "weight", "composite_score"]].to_dict(orient="records")
     with open(SIGNALS_FILE, "w") as f:
         json.dump({"saved_at": datetime.today().isoformat(), "longs": records}, f, indent=2)
@@ -72,17 +72,25 @@ def check_and_replace_stopped_positions(dry_run: bool = False) -> None:
     portfolio_value = acct["portfolio_value"]
     cfg = _load_config()
 
-    # Re-rank universe to find replacements
-    from utils.openbb_client import get_sp500_tickers, get_price_history, get_fundamentals
+    # Re-rank using the configured universe (reads preset from universe.yaml)
+    from utils.openbb_client import get_universe_tickers, get_price_history, get_fundamentals, get_sector_map
     from strategies.value_momentum_120_20 import ValueMomentum12020
 
     print("Re-ranking universe for replacements...")
-    tickers = get_sp500_tickers()
+    tickers = get_universe_tickers()
     prices = get_price_history(tickers, start="2022-01-01")
     fundamentals = get_fundamentals(list(prices.columns))
 
+    sectors: dict = {}
+    if cfg.get("sector_neutral", False):
+        sectors = get_sector_map()
+
     strategy = ValueMomentum12020(cfg)
-    all_signals = strategy.generate_signals({"prices": prices, "fundamentals": fundamentals})
+    all_signals = strategy.generate_signals({
+        "prices": prices,
+        "fundamentals": fundamentals,
+        "sectors": sectors,
+    })
     ranked_longs = all_signals[all_signals["action"] == "BUY"].sort_values("composite_score", ascending=False)
 
     # Exclude tickers already held or already in expected signals

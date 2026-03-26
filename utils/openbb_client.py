@@ -281,6 +281,176 @@ def get_sp500_tickers() -> list[str]:
 
 
 # =============================================================================
+# Point-in-time S&P 500 membership (survivorship-bias-free backtesting)
+# =============================================================================
+
+_SP500_MEMBERS_CSV = ROOT / "data" / "sp500_historical_members.csv"
+_SP500_MEMBERS_URL = (
+    "https://raw.githubusercontent.com/fja05680/sp500/master/"
+    "S%26P%20500%20Historical%20Components%20%26%20Changes.csv"
+)
+
+
+def _ensure_sp500_members_downloaded() -> None:
+    """Download the historical S&P 500 membership CSV if not already on disk."""
+    if _SP500_MEMBERS_CSV.exists():
+        return
+    print("Downloading historical S&P 500 membership data (one-time, ~2MB)...")
+    resp = requests.get(_SP500_MEMBERS_URL, timeout=30)
+    resp.raise_for_status()
+    _SP500_MEMBERS_CSV.parent.mkdir(parents=True, exist_ok=True)
+    _SP500_MEMBERS_CSV.write_bytes(resp.content)
+    print(f"Saved to {_SP500_MEMBERS_CSV}")
+
+
+def get_sp500_members_at(date: pd.Timestamp) -> list[str]:
+    """
+    Return the list of S&P 500 tickers that were members on a given date.
+    Uses the fja05680/sp500 dataset (daily snapshots from 1996 to present).
+
+    Tickers are normalised to yfinance format (dots → dashes, e.g. BRK.B → BRK-B).
+    If the exact date is not in the dataset, the most recent prior date is used.
+    """
+    _ensure_sp500_members_downloaded()
+
+    # Cache the parsed DataFrame in memory across calls within one process
+    if not hasattr(get_sp500_members_at, "_df"):
+        df = pd.read_csv(_SP500_MEMBERS_CSV)
+        df.columns = df.columns.str.strip().str.lower()
+        # Column names: 'date', 'tickers'
+        df["date"] = pd.to_datetime(df["date"])
+        df = df.sort_values("date").reset_index(drop=True)
+        get_sp500_members_at._df = df
+
+    df = get_sp500_members_at._df
+
+    # Find the latest snapshot on or before the requested date
+    available = df[df["date"] <= date]
+    if available.empty:
+        logger.warning(f"No S&P 500 membership data before {date.date()} — using earliest available.")
+        available = df.head(1)
+
+    tickers_str = available.iloc[-1]["tickers"]
+    tickers = []
+    for t in tickers_str.split(","):
+        t = t.strip()
+        if not t:
+            continue
+        # Strip removal-date annotations like "GGP-201808" → "GGP"
+        # A valid removal annotation is a dash followed by exactly 6 digits at the end
+        import re
+        t = re.sub(r"-\d{6}$", "", t)
+        t = t.replace(".", "-")  # normalise to yfinance format
+        if t:
+            tickers.append(t)
+    return tickers
+
+
+_SP_MIDSMALL_CACHE_KEY = "sp_midsmall_current"
+
+
+def _get_midsmall_tickers() -> set[str]:
+    """
+    Return current S&P MidCap 400 + SmallCap 600 tickers from Wikipedia.
+    Cached for 24 hours. Used as the mid/small component for sp1500 backtesting.
+
+    NOTE: This is today's membership list. No free point-in-time dataset exists for
+    S&P 400/600, so mid/small components carry modest survivorship bias in backtests.
+    The S&P 500 component uses the accurate historical dataset.
+    """
+    cached = _load_cache(_SP_MIDSMALL_CACHE_KEY, ttl_hours=24.0)
+    if cached is not None:
+        return set(cached)
+
+    tickers = []
+    # S&P 400 and S&P 600 Wikipedia tables use "Symbol" column (not "Ticker symbol")
+    for url in [
+        "https://en.wikipedia.org/wiki/List_of_S%26P_400_companies",
+        "https://en.wikipedia.org/wiki/List_of_S%26P_600_companies",
+    ]:
+        try:
+            tables = _read_wiki_html(url)
+            for t in tables:
+                if "Symbol" in t.columns:
+                    tickers += t["Symbol"].str.replace(".", "-", regex=False).tolist()
+                    break
+        except Exception as e:
+            logger.warning(f"Could not fetch mid/small tickers from {url}: {e}")
+
+    _save_cache(_SP_MIDSMALL_CACHE_KEY, tickers)
+    return set(tickers)
+
+
+def get_sp1500_members_at(date: pd.Timestamp) -> list[str]:
+    """
+    Return S&P 1500 tickers (S&P 500 + MidCap 400 + SmallCap 600) for a given date.
+
+    S&P 500 component:    point-in-time historical dataset — no survivorship bias.
+    S&P 400/600 component: current Wikipedia list — modest survivorship bias
+                           (no free historical dataset available for these indices).
+    """
+    sp500 = set(get_sp500_members_at(date))
+    midsmall = _get_midsmall_tickers()
+    return list(sp500 | midsmall)
+
+
+def get_index_members_at(date: pd.Timestamp, universe: str = "sp500") -> list[str]:
+    """
+    Dispatcher: return index members at a given date for the configured universe.
+
+    universe: "sp500" | "sp1500"  (other presets fall back to sp500)
+    """
+    if universe == "sp1500":
+        return get_sp1500_members_at(date)
+    return get_sp500_members_at(date)
+
+
+_SECTOR_CACHE_KEY = "sp500_sectors"
+
+
+def get_sector_map() -> dict[str, str]:
+    """
+    Return {ticker: GICS sector} for all S&P 1500 members from Wikipedia.
+    Covers S&P 500, S&P MidCap 400, and S&P SmallCap 600.
+    Used for sector neutralization in the strategy (ranking within sector).
+
+    Cached for 24 hours. Returns an empty dict on failure (strategy falls back to
+    global ranking gracefully).
+    """
+    cached = _load_cache(_SECTOR_CACHE_KEY, ttl_hours=24.0)
+    if cached is not None:
+        return cached
+
+    # Each Wikipedia table has "Symbol" and "GICS Sector" columns
+    sources = [
+        "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
+        "https://en.wikipedia.org/wiki/List_of_S%26P_400_companies",
+        "https://en.wikipedia.org/wiki/List_of_S%26P_600_companies",
+    ]
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; algo-trading-bot/1.0)"}
+    sector_map: dict[str, str] = {}
+    for url in sources:
+        try:
+            resp = requests.get(url, headers=headers, timeout=15)
+            resp.raise_for_status()
+            tables = pd.read_html(io.StringIO(resp.text))
+            for table in tables:
+                if "Symbol" in table.columns and "GICS Sector" in table.columns:
+                    chunk = dict(zip(
+                        table["Symbol"].str.replace(".", "-", regex=False),
+                        table["GICS Sector"],
+                    ))
+                    sector_map.update(chunk)
+                    break
+        except Exception as e:
+            logger.warning(f"Could not fetch sector map from {url}: {e}")
+
+    if sector_map:
+        _save_cache(_SECTOR_CACHE_KEY, sector_map)
+    return sector_map
+
+
+# =============================================================================
 # Price data — batched with caching
 # =============================================================================
 
@@ -306,18 +476,27 @@ def get_price_history(
         return cached
 
     frames = {}
+    import yfinance as yf
 
     def _fetch_one(ticker: str) -> tuple[str, pd.DataFrame | None]:
         try:
-            result = obb.equity.price.historical(
-                symbol=ticker,
-                start_date=start,
-                end_date=end,
+            # auto_adjust=True returns dividend and split-adjusted close prices
+            df = yf.download(
+                ticker,
+                start=start,
+                end=end,
                 interval=interval,
-                provider="yfinance",
+                auto_adjust=True,
+                progress=False,
+                threads=False,
             )
-            df = result.to_df()[["close"]].rename(columns={"close": ticker})
-            return ticker, df
+            if df.empty:
+                return ticker, None
+            close = df["Close"]
+            if isinstance(close, pd.DataFrame):
+                close = close.iloc[:, 0]
+            close = close.rename(ticker)
+            return ticker, close.to_frame()
         except Exception:
             return ticker, None
 
@@ -338,7 +517,9 @@ def get_price_history(
     if not frames:
         return pd.DataFrame()
 
-    result = pd.concat(frames.values(), axis=1).sort_index()
+    result = pd.concat(frames.values(), axis=1)
+    result.index = pd.to_datetime(result.index)
+    result = result.sort_index()
     _save_cache(cache_key, result)
     return result
 
@@ -353,34 +534,54 @@ def get_fundamentals(
     cache_ttl_hours: float = 24.0,
 ) -> pd.DataFrame:
     """
-    Returns key valuation metrics for each ticker.
-    Columns: pe_ratio, pb_ratio, fcf_yield, ev_ebitda, market_cap
+    Returns key valuation and quality metrics for each ticker via yfinance.
+    Columns: pe_ratio, pb_ratio, fcf_yield, ev_ebitda, market_cap,
+             roe, net_margin, debt_equity
 
     Parallelized — large universes still take several minutes on first run,
     but results are cached for 24 hours.
     """
-    cache_key = f"fundamentals_{len(tickers)}"
+    cache_key = f"fundamentals_v2_{len(tickers)}"
     cached = _load_cache(cache_key, cache_ttl_hours)
     if cached is not None:
         return cached
 
+    import yfinance as yf
+
     def _fetch_one(ticker: str) -> dict | None:
         try:
-            result = obb.equity.fundamental.metrics(
-                symbol=ticker,
-                provider="yfinance",
-            )
-            df = result.to_df()
-            if df.empty:
-                return None
-            row = df.iloc[-1]
+            info = yf.Ticker(ticker).info
+
+            mktcap = info.get("marketCap") or np.nan
+
+            # Value factors
+            pe_ratio  = info.get("trailingPE")        or np.nan
+            pb_ratio  = info.get("priceToBook")        or np.nan
+            ev_ebitda = info.get("enterpriseToEbitda") or np.nan
+
+            # FCF yield = freeCashflow / marketCap
+            fcf = info.get("freeCashflow")
+            fcf_yield = (float(fcf) / float(mktcap)
+                         if fcf and mktcap and np.isfinite(mktcap)
+                         else np.nan)
+
+            # Quality factors (yfinance returns these as ratios: 0.15 = 15%)
+            roe        = info.get("returnOnEquity") or np.nan
+            net_margin = info.get("profitMargins")  or np.nan
+            # debtToEquity from yfinance is D/E × 100 (e.g. 150 = 1.5× D/E)
+            de_raw     = info.get("debtToEquity")
+            debt_equity = float(de_raw) / 100.0 if de_raw is not None else np.nan
+
             return {
-                "ticker": ticker,
-                "pe_ratio": row.get("pe_ratio", np.nan),
-                "pb_ratio": row.get("pb_ratio", np.nan),
-                "fcf_yield": row.get("fcf_yield", np.nan),
-                "ev_ebitda": row.get("ev_ebitda", np.nan),
-                "market_cap": row.get("market_cap", np.nan),
+                "ticker":      ticker,
+                "pe_ratio":    pe_ratio,
+                "pb_ratio":    pb_ratio,
+                "fcf_yield":   fcf_yield,
+                "ev_ebitda":   ev_ebitda,
+                "market_cap":  mktcap,
+                "roe":         roe,
+                "net_margin":  net_margin,
+                "debt_equity": debt_equity,
             }
         except Exception:
             return None

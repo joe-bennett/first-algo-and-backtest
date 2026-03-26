@@ -1,9 +1,9 @@
 # Alert configuration
-# Controls when and how trade signals are sent to you via SMS
+# Controls when and how trade signals are sent to you via email
 
-sms:
+email:
   enabled: true
-  # Credentials loaded from .env — do not put them here
+  # Credentials loaded from .env (GMAIL_ADDRESS, GMAIL_APP_PASSWORD, ALERT_TO_EMAIL)
 
 # When to send alerts
 triggers:
@@ -12,7 +12,7 @@ triggers:
   condor_opportunity: true    # Send when iron condor conditions are met
   risk_breach: true           # Send when a position breaches risk limits
 
-# Quiet hours — no SMS during these times (24h format, your local time)
+# Quiet hours — no alerts during these times (24h format, your local time)
 quiet_hours:
   enabled: true
   start: "22:00"
