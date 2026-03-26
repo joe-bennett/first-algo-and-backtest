@@ -38,9 +38,22 @@ python quickstart.py
 If it completes without errors, the data pipeline is working.
 
 ### 4. Launch the dashboard
+
+**Option A — double-click or type from the project folder:**
+```bash
+dashboard.bat
+```
+
+**Option B — full command:**
 ```bash
 streamlit run dashboard/app.py
 ```
+
+**Option C — from anywhere in PowerShell** (one-time setup, adds a shortcut to your profile):
+```powershell
+Add-Content $PROFILE "`nfunction start-dashboard { Set-Location 'C:\path\to\first-algo-and-backtest'; streamlit run dashboard/app.py }"
+```
+Replace the path with wherever you cloned the repo. After that, typing `start-dashboard` in any PowerShell window opens the dashboard.
 
 ---
 
