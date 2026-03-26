@@ -2,7 +2,7 @@
 
 An automated trading system built around two strategies:
 
-- **120/20 Value-Momentum** — ranks S&P 500 stocks by a blend of value and momentum factors, goes long the top-ranked and short the bottom-ranked, rebalances monthly
+- **120/20 Value-Momentum** — ranks S&P 500 stocks by a blend of value and momentum factors, goes long the top-ranked and short the bottom-ranked, rebalances monthly or quarterly (changable)
 - **Iron Condor (opportunistic)** — scans for elevated implied volatility and alerts when conditions are right to sell premium
 
 The system sends email alerts, runs historical backtests, trades automatically on Alpaca paper, and has a Streamlit dashboard for analysis.
