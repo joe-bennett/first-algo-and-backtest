@@ -145,10 +145,25 @@ elif page == "Backtest":
         quality_weight  = round(max(0.0, 1.0 - value_weight - momentum_weight), 2)
         st.write(f"Quality weight (auto): **{quality_weight:.0%}**")
         rebalance_freq  = st.selectbox("Rebalance frequency", ["monthly", "quarterly"])
-        long_pct  = st.slider("Long book: top X% of universe",   0.05, 0.40, 0.20, 0.05)
+        long_pct  = st.slider("Long book: top X% of universe",     0.05, 0.40, 0.20, 0.05)
         short_pct = st.slider("Short book: bottom X% of universe", 0.05, 0.40, 0.20, 0.05)
         enable_short   = st.checkbox("Enable short book", value=True)
         sector_neutral = st.checkbox("Sector neutralization", value=True)
+
+        st.markdown("**Exposure (the X/Y in 120/20)**")
+        long_weight  = st.slider("Long-side capital deployed (% of portfolio)",
+                                 1.00, 2.00, 1.20, 0.05,
+                                 help="120% = $120k deployed long per $100k equity. "
+                                      "Extra capital comes from short sale proceeds.")
+        short_weight = st.slider("Short-side capital deployed (% of portfolio)",
+                                 0.00, 0.50, 0.20, 0.05,
+                                 disabled=not enable_short,
+                                 help="20% = $20k short per $100k equity. "
+                                      "Short proceeds fund the extra long-side buying.")
+        lw_label = int(round(long_weight * 100))
+        sw_label = int(round(short_weight * 100))
+        st.caption(f"Strategy: **{lw_label}/{sw_label}** — "
+                   f"net exposure {lw_label - sw_label}%, gross exposure {lw_label + sw_label}%")
 
     st.markdown("---")
     st.subheader("Concentration Mode")
@@ -170,16 +185,12 @@ elif page == "Backtest":
              "Most impactful when combined with concentration mode.",
     )
     if use_concentration:
-        with open(CONFIG_DIR / "portfolio.yaml", encoding="utf-8") as _f:
-            _cfg = yaml.safe_load(_f)
-        _lw = _cfg["strategy"]["long_weight"]
-        _sw = _cfg["strategy"]["short_weight"]
         if weight_by_conviction:
-            conc_col1.caption(f"Avg long ≈ {_lw/top_n_longs*100:.1f}% — top stock gets more, bottom gets less")
-            conc_col2.caption(f"Avg short ≈ {_sw/top_n_shorts*100:.1f}% — most extreme short gets more")
+            conc_col1.caption(f"Avg long ≈ {long_weight/top_n_longs*100:.1f}% — top stock gets more, bottom gets less")
+            conc_col2.caption(f"Avg short ≈ {short_weight/top_n_shorts*100:.1f}% — most extreme short gets more")
         else:
-            conc_col1.caption(f"Each long = {_lw/top_n_longs*100:.1f}% of portfolio (equal weight)")
-            conc_col2.caption(f"Each short = {_sw/top_n_shorts*100:.1f}% of portfolio (equal weight)")
+            conc_col1.caption(f"Each long = {long_weight/top_n_longs*100:.1f}% of portfolio (equal weight)")
+            conc_col2.caption(f"Each short = {short_weight/top_n_shorts*100:.1f}% of portfolio (equal weight)")
 
     st.info(
         "**Note on backtesting puts:** Put signals are simulated as short positions (same direction, "
@@ -189,7 +200,7 @@ elif page == "Backtest":
 
     run_label = st.text_input(
         "Run label (for comparison)",
-        value=f"run_{start_date.year}_{value_weight:.0%}val_{'conc' if use_concentration else 'div'}_{'sn' if sector_neutral else 'global'}",
+        value=f"{lw_label}/{sw_label}_{start_date.year}_{'conc' if use_concentration else 'div'}_{'cv' if weight_by_conviction else 'eq'}",
     )
 
     if start_date < pd.Timestamp("2020-01-01").date():
@@ -208,8 +219,10 @@ elif page == "Backtest":
             },
             "strategy": {
                 "rebalance_frequency": rebalance_freq,
-                "long_pct":  long_pct,
-                "short_pct": short_pct,
+                "long_pct":    long_pct,
+                "short_pct":   short_pct,
+                "long_weight":  long_weight,
+                "short_weight": short_weight,
             },
             "enable_short_book": enable_short,
             "sector_neutral":    sector_neutral,
