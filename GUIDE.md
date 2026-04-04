@@ -257,26 +257,52 @@ Shows current strategy settings and config. In Phase 2, this will show your live
 paper trading positions and P&L.
 
 ### Backtest
-Run a historical test of the strategy. You can:
-- Set the date range (e.g., 2018–2024)
-- Adjust value vs. momentum weighting with a slider
-- Change rebalance frequency (monthly vs. quarterly)
-- Change how many stocks are in the long/short books
-- Compare multiple runs side by side in a table
+Run a historical test of the strategy. Every parameter below is adjustable without
+touching any files — changes only affect that backtest run, not the live system.
+
+**Factor weights**
+- Value / momentum / quality blend (sliders; quality auto-fills to keep sum at 100%)
+
+**Universe and book size**
+- Long book: top X% of universe (how many stocks, not how much capital)
+- Short book: bottom X% of universe (same idea)
+- Rebalance frequency: monthly or quarterly
+
+**Exposure — the X/Y in 120/20**
+- Long-side capital deployed: how much of the portfolio is invested long (default 120%)
+- Short-side capital deployed: how much is short (default 20%)
+- A live label shows the current strategy name ("130/30 — net 100%, gross 160%") and
+  updates as you move the sliders so you always know what structure you're testing
+
+**Concentration and conviction**
+- Concentration mode: fix the long/short book to a specific stock count instead of a
+  percentage (e.g., top 15 longs at 8% each instead of top 20% at 1.2% each)
+- Weight by conviction: score-proportional sizing within the book so rank #1 gets more
+  capital than rank #15 (most impactful combined with concentration mode)
+
+**Other**
+- Sector neutralization toggle
+- Run label (auto-filled with the key settings so the comparison table is self-labeling)
 
 Each run shows an equity curve, drawdown chart, rolling Sharpe, and a metrics table
-vs. the S&P 500 benchmark.
+vs. the S&P 500 benchmark. Multiple runs stack in a comparison table at the bottom.
+
+> **Note on puts in backtests:** Put signals are simulated as short positions (same
+> directional exposure, 1:1 payoff). The convex upside of real options cannot be
+> reproduced without implied volatility history.
 
 ### Signals
 Shows what the strategy recommends right now. Includes:
-- Top long candidates with their factor scores
-- Top short candidates
-- Any iron condor opportunities
-- Check "Dry run" to preview the email text before actually sending it
+- Top long candidates with factor scores and WHY explanations
+- Short book — regular short shares
+- Short book — conviction puts (separate section when `short_book_puts` is enabled)
+- Iron condor opportunities
+- "Dry run" checkbox: preview the full email text without sending anything
 
 ### Research Sandbox
-Quickly change factor weights and see how the top-ranked stocks change —
-without running a full backtest. Good for fast "what if" exploration.
+Quickly change factor weights, concentration, and conviction settings to see how the
+top-ranked stocks change — without running a full backtest. Results appear in seconds.
+Good for fast "what if" questions before committing to a full backtest run.
 
 ---
 
@@ -611,6 +637,26 @@ environments trigger an alert).
 **How condor sizing works:** The alert email tells you exactly how many contracts to trade — no math needed. The system reserves `per_condor_pct` (5%) of your portfolio as the margin budget for each condor, then divides by the max loss per contract to arrive at a contract count. The 15% total cap means no more than 3 condors open at once before the scanner stops recommending new ones.
 
 **Condor and 120/20 conflict avoidance:** The condor scanner automatically skips any ticker already held in the 120/20 equity book. A condor profits when a stock stays range-bound — that conflicts with holding it as a directional long or short. When the scanner runs, it reads live positions from Alpaca (or falls back to `data/last_signals.json`) and removes those tickers from consideration before screening.
+
+### Long/short exposure — the X/Y in 120/20
+```yaml
+strategy:
+  long_weight: 1.20    ← deploy 120% of portfolio value long (the "120" in 120/20)
+  short_weight: 0.20   ← deploy 20% of portfolio value short (the "20" in 120/20)
+```
+This controls **how much total capital** is deployed on each side — not how many stocks.
+The extra long-side capital (beyond 100%) is funded by the proceeds from short selling.
+
+| long_weight | short_weight | Net exposure | Gross exposure | Name |
+|---|---|---|---|---|
+| 1.00 | 0.00 | 100% | 100% | Long-only |
+| 1.20 | 0.20 | 100% | 140% | 120/20 (default) |
+| 1.30 | 0.30 | 100% | 160% | 130/30 |
+| 1.50 | 0.50 | 100% | 200% | 150/50 |
+
+You can also test these directly on the **Backtest page** using the "Long-side capital
+deployed" and "Short-side capital deployed" sliders — no file editing needed. A live
+label shows the resulting strategy name and gross/net exposure as you move the sliders.
 
 ### Position size limits
 ```yaml
