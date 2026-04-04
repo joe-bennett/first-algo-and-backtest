@@ -478,8 +478,9 @@ reduce risk. The long book is identical either way — only the short positions 
 ### Concentration mode
 ```yaml
 concentration:
-  top_n_longs: null    ← null = use long_pct percentage (default: top 20%)
-  top_n_shorts: null   ← null = use short_pct percentage (default: bottom 20%)
+  top_n_longs: null            ← null = use long_pct percentage (default: top 20%)
+  top_n_shorts: null           ← null = use short_pct percentage (default: bottom 20%)
+  weight_by_conviction: false  ← true = score-proportional sizing within the book
 ```
 By default the portfolio spreads across the top 20% of ranked stocks (~100 names at 1.2% each).
 Concentration mode overrides this with a fixed count so more capital goes to your
@@ -505,6 +506,55 @@ concentration:
 
 The dashboard Backtest page has a "Concentration mode" toggle that lets you backtest
 different counts without editing the YAML file.
+
+### Weight by conviction (score-proportional sizing)
+```yaml
+concentration:
+  weight_by_conviction: false   ← true = higher-ranked stocks get more capital
+```
+
+By default, equal weight is applied within the long and short books — every stock in
+the top 15 gets the same 8% regardless of whether it scored 0.94 or 0.79. Conviction
+weighting breaks that equal split: **position size becomes proportional to composite score**.
+
+**How the math works for longs:**
+```
+position_weight = (stock's composite score / sum of all selected scores) × total long exposure
+
+Example with top 5 longs, long exposure = 120%:
+  Stock A  score 0.94  →  0.94 / 4.25  × 120% = 26.5%  ← gets most capital
+  Stock B  score 0.88  →  0.88 / 4.25  × 120% = 24.8%
+  Stock C  score 0.83  →  0.83 / 4.25  × 120% = 23.4%
+  Stock D  score 0.79  →  0.79 / 4.25  × 120% = 22.3%
+  Stock E  score 0.81  →  0.81 / 4.25  × 120% = 22.9%  ← gets least capital
+  Total: 120% ✓
+```
+
+**How the math works for shorts (and puts):**
+For short positions, a *lower* composite score means *stronger bearish conviction* — the
+stock ranks at the very bottom of the universe. So the weighting is inverted:
+```
+short_conviction = (highest score in short book) − (stock's score)
+position_weight  = short_conviction / sum(all short convictions) × total short exposure
+
+Example with bottom 3 shorts, short exposure = 20%:
+  Stock X  score 0.09  →  conviction = 0.21 − 0.09 = 0.12  →  largest short
+  Stock Y  score 0.14  →  conviction = 0.21 − 0.14 = 0.07  →  mid short
+  Stock Z  score 0.21  →  conviction = 0.21 − 0.21 = 0.00 + floor →  smallest short
+```
+
+**When to use it:**
+- Most impactful **combined with concentration mode** (`top_n_longs: 15`). When each position
+  averages 8%, a spread from 6% to 10% between the weakest and strongest pick is meaningful
+  ($4,000 difference on a $100k portfolio per stock).
+- At default diversification (~100 longs at 1.2% each), conviction weighting only spreads
+  positions across a ~0.8%–1.6% range — meaningful but subtle.
+- **Off by default** because equal weighting is more stable and still captures the full alpha
+  of stock selection. Conviction weighting adds a layer of concentration within an already
+  concentrated book.
+
+**Dashboard:** The Backtest page and Research Sandbox both have a "Weight by conviction"
+checkbox. Check it alongside "Concentration mode" to see the combined effect in backtests.
 
 ### Puts on the short book
 ```yaml

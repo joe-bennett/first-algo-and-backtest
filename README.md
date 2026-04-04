@@ -172,11 +172,16 @@ strategy:
 ### Concentrate to highest-conviction names (aggressive mode)
 ```yaml
 concentration:
-  top_n_longs: 15    # hold only the top 15 longs at ~8% each (null = diversified default)
-  top_n_shorts: 10   # hold only the bottom 10 shorts at ~2% each
+  top_n_longs: 15              # hold only the top 15 longs at ~8% each (null = diversified default)
+  top_n_shorts: 10             # hold only the bottom 10 shorts at ~2% each
+  weight_by_conviction: false  # true = rank #1 gets more capital than rank #15
 ```
-Default behavior spreads across ~100 longs at 1.2% each. Concentration amplifies returns
-and drawdowns — always backtest before going live with a concentrated setting.
+Default behavior spreads ~100 longs at 1.2% each with equal weight. Concentration mode
+reduces the count so each position is larger. `weight_by_conviction` then adds a further
+layer: position size becomes proportional to composite score, so the strongest-ranked
+stock gets more capital than the weakest stock still in the book. Most impactful when
+combined — e.g., top 15 longs with conviction weighting can produce a range of ~6%–10%
+per stock instead of a flat 8%. Always backtest before going live with these settings.
 
 ### Use put options on the short book (highest-conviction shorts)
 ```yaml

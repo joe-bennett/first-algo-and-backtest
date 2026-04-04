@@ -89,8 +89,9 @@ class ValueMomentum12020(BaseStrategy):
 
         # Concentration mode: fixed stock count overrides percentage-based sizing
         concentration = self.config.get("concentration", {})
-        top_n_longs_override  = concentration.get("top_n_longs")   # None = use long_pct
-        top_n_shorts_override = concentration.get("top_n_shorts")  # None = use short_pct
+        top_n_longs_override  = concentration.get("top_n_longs")       # None = use long_pct
+        top_n_shorts_override = concentration.get("top_n_shorts")      # None = use short_pct
+        weight_by_conviction  = concentration.get("weight_by_conviction", False)
 
         # Puts on short book: bottom conviction_n get action="PUT" instead of "SHORT"
         puts_cfg   = self.config.get("short_book_puts", {})
@@ -199,16 +200,47 @@ class ValueMomentum12020(BaseStrategy):
             put_tickers   = []
             short_tickers = short_tickers_all
 
-        # Weight allocation: 120/20 when short book on, 100/0 when off
-        long_weight  = cfg["long_weight"] / n_long
-        short_weight = (cfg["short_weight"] / n_short) if (enable_short and n_short > 0) else 0.0
+        # ── Weight allocation ────────────────────────────────────────────────────
+        # Equal weight (default): every long gets long_weight/n_long, every short gets short_weight/n_short
+        # Conviction weight: position size is proportional to composite score so the
+        #   highest-ranked stock gets more capital than the lowest-ranked stock in the book.
+        #
+        # For longs:  weight_i = score_i / sum(scores) * long_weight_total
+        # For shorts: weight_i = (1 - score_i) / sum(1 - scores) * short_weight_total
+        #   (lower composite score = stronger bearish signal = more short/put weight)
+        #
+        # Note: all scores in the top-N long book are already high (e.g. 0.79–0.94), so the
+        # spread from conviction weighting is moderate (~1.3x). The most noticeable impact is
+        # when combined with concentration mode where absolute position sizes are larger.
+
+        long_weight_total  = cfg["long_weight"]
+        short_weight_total = cfg["short_weight"] if (enable_short and n_short > 0) else 0.0
+
+        # All short-side tickers share the short weight budget (PUT and SHORT together)
+        all_short_tickers = short_tickers + put_tickers
+
+        if weight_by_conviction and n_long > 1:
+            long_scores = composite[long_tickers]
+            long_w = (long_scores / long_scores.sum() * long_weight_total)
+        else:
+            long_w = pd.Series({t: long_weight_total / n_long for t in long_tickers})
+
+        if weight_by_conviction and all_short_tickers:
+            short_scores = composite[all_short_tickers]
+            # Invert: lower composite score = stronger bearish conviction = more weight
+            inverted = short_scores.max() - short_scores + 1e-6
+            short_w = (inverted / inverted.sum() * short_weight_total)
+        else:
+            n_all_short = len(all_short_tickers)
+            flat = short_weight_total / n_all_short if n_all_short > 0 else 0.0
+            short_w = pd.Series({t: flat for t in all_short_tickers})
 
         rows = []
         for t in long_tickers:
             rows.append({
                 "ticker":          t,
                 "action":          "BUY",
-                "weight":          round(long_weight, 4),
+                "weight":          round(long_w[t], 4),
                 "composite_score": round(composite[t], 4),
                 "momentum_score":  round(float(momentum_score.get(t, np.nan)), 4),
                 "value_score":     round(float(value_score.get(t, np.nan)), 4),
@@ -224,7 +256,7 @@ class ValueMomentum12020(BaseStrategy):
             return {
                 "ticker":          t,
                 "action":          action,   # "SHORT" or "PUT"
-                "weight":          round(-short_weight, 4),
+                "weight":          round(-short_w[t], 4),
                 "composite_score": round(composite[t], 4),
                 "momentum_score":  round(float(momentum_score.get(t, np.nan)), 4),
                 "value_score":     round(float(value_score.get(t, np.nan)), 4),

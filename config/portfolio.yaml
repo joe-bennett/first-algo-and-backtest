@@ -46,6 +46,9 @@ enable_short_book: true
 concentration:
   top_n_longs: null        # null = use long_pct; integer = fixed count (e.g. 15)
   top_n_shorts: null       # null = use short_pct; integer = fixed count (e.g. 10)
+  weight_by_conviction: false  # true = score-proportional position sizing (rank #1 gets more
+                               # capital than rank #15); false = equal weight within the book
+                               # Most impactful when combined with top_n_longs/shorts
 
 # ── Puts on the short book ─────────────────────────────────────────────────────
 # Instead of short-selling shares for the highest-conviction shorts, buy OTM put options.

@@ -163,13 +163,23 @@ elif page == "Backtest":
                                            disabled=not use_concentration)
     top_n_shorts = conc_col2.number_input("Top N shorts", min_value=5,  max_value=100, value=10, step=5,
                                            disabled=not use_concentration)
+    weight_by_conviction = st.checkbox(
+        "Weight by conviction (score-proportional sizing)",
+        value=False,
+        help="Rank #1 gets more capital than rank #15, proportional to composite score. "
+             "Most impactful when combined with concentration mode.",
+    )
     if use_concentration:
         with open(CONFIG_DIR / "portfolio.yaml", encoding="utf-8") as _f:
             _cfg = yaml.safe_load(_f)
         _lw = _cfg["strategy"]["long_weight"]
         _sw = _cfg["strategy"]["short_weight"]
-        conc_col1.caption(f"Each long = {_lw/top_n_longs*100:.1f}% of portfolio")
-        conc_col2.caption(f"Each short = {_sw/top_n_shorts*100:.1f}% of portfolio")
+        if weight_by_conviction:
+            conc_col1.caption(f"Avg long ≈ {_lw/top_n_longs*100:.1f}% — top stock gets more, bottom gets less")
+            conc_col2.caption(f"Avg short ≈ {_sw/top_n_shorts*100:.1f}% — most extreme short gets more")
+        else:
+            conc_col1.caption(f"Each long = {_lw/top_n_longs*100:.1f}% of portfolio (equal weight)")
+            conc_col2.caption(f"Each short = {_sw/top_n_shorts*100:.1f}% of portfolio (equal weight)")
 
     st.info(
         "**Note on backtesting puts:** Put signals are simulated as short positions (same direction, "
@@ -204,8 +214,9 @@ elif page == "Backtest":
             "enable_short_book": enable_short,
             "sector_neutral":    sector_neutral,
             "concentration": {
-                "top_n_longs":  int(top_n_longs)  if use_concentration else None,
-                "top_n_shorts": int(top_n_shorts) if use_concentration else None,
+                "top_n_longs":         int(top_n_longs)  if use_concentration else None,
+                "top_n_shorts":        int(top_n_shorts) if use_concentration else None,
+                "weight_by_conviction": weight_by_conviction,
             },
         }
 
@@ -340,6 +351,9 @@ elif page == "Research Sandbox":
                                                key="sandbox_nl", disabled=not sb_use_conc)
     sb_top_shorts = sb_conc_col3.number_input("Top N shorts", min_value=5, max_value=100, value=10, step=5,
                                                key="sandbox_ns", disabled=not sb_use_conc)
+    sb_conviction = st.checkbox("Weight by conviction (score-proportional sizing)", value=False,
+                                key="sandbox_conv",
+                                help="Rank #1 gets more capital than rank #N, proportional to composite score.")
 
     if st.button("Preview Signals"):
         with st.spinner("Generating signals..."):
@@ -356,8 +370,9 @@ elif page == "Research Sandbox":
             cfg["enable_short_book"] = enable_short
             cfg["sector_neutral"]    = sector_neutral
             cfg["concentration"] = {
-                "top_n_longs":  int(sb_top_longs)  if sb_use_conc else None,
-                "top_n_shorts": int(sb_top_shorts) if sb_use_conc else None,
+                "top_n_longs":         int(sb_top_longs)  if sb_use_conc else None,
+                "top_n_shorts":        int(sb_top_shorts) if sb_use_conc else None,
+                "weight_by_conviction": sb_conviction,
             }
 
             # Use today's S&P 500 members for current signal preview
