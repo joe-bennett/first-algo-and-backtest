@@ -15,6 +15,9 @@ logs/
 # Claude Code local memory
 .claude/
 
+# Generated documents (kept local only)
+*.docx
+
 # OS
 .DS_Store
 Thumbs.db
