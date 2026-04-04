@@ -57,11 +57,62 @@ is fully functional without any options approval.
 
 ---
 
+### Do I need a brokerage account at all?
+
+**No — most of the system works without one:**
+
+| Works without any brokerage | Requires Alpaca |
+|---|---|
+| Backtesting (full historical simulation) | Portfolio Overview page (live positions) |
+| Research Sandbox | Automated rebalancing |
+| Signal scanning — today's ranked stocks | Automated stop-loss replacement |
+| Email alerts | Placing live or paper trades |
+| All dashboard charts | Put option order placement |
+
+If you skip Alpaca for now, leave those three lines blank in `.env`. The Portfolio
+Overview page will show your config instead of live positions; everything else works.
+
+---
+
+### What is Alpaca?
+
+Alpaca (alpaca.markets) is a **free brokerage with an open API** — meaning you can write
+code that places real trades automatically. It also offers **paper trading**: a simulated
+account pre-loaded with $100,000 of fake money so you can test automated strategies
+without risking anything real. That's what this system uses by default.
+
+Paper trading is completely free, requires no credit card, and takes about 5 minutes to
+set up. You do not need to fund the account or go through a full brokerage application.
+
+### How to set up Alpaca (5 minutes)
+
+1. Go to **alpaca.markets** → click "Get Started Free"
+2. Create an account with your email and a password — no credit card required
+3. You land in the paper trading dashboard with $100,000 simulated balance
+4. Click your name in the top-right corner → **API Keys** → **Generate New Key**
+5. Copy both the **API Key** (starts with `PK...`) and the **Secret Key**
+   — you only see the secret once, copy it somewhere safe immediately
+6. Open your `.env` file and add:
+```
+ALPACA_API_KEY=PKXXXXXXXXXXXXXXXX
+ALPACA_SECRET_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+ALPACA_BASE_URL=https://paper-api.alpaca.markets
+```
+
+The system will now connect to your paper account, place simulated trades on rebalance
+dates, track positions, and show live P&L in the Portfolio Overview dashboard.
+
+> **When you're ready for real money:** Fund a live Alpaca account and change
+> `ALPACA_BASE_URL` to `https://api.alpaca.markets`. Everything else stays the same.
+> Only do this after running paper trading long enough to trust the system.
+
+---
+
 ### Which broker to use
 
 | Broker | Best for | Notes |
 |---|---|---|
-| **Alpaca** | Paper trading now, automation later | Free account, commission-free trades, built-in paper trading with $100k simulated money. Best path to Phase 3 automation. Sign up at alpaca.markets |
+| **Alpaca** | Paper trading now, automation later | Free, no credit card, $100k simulated balance, commission-free. Best path to Phase 3 automation. |
 | **Interactive Brokers (IBKR)** | Live trading, especially options | Best long-term for condors — best short-locate inventory, lowest margin rates, institutional quality. More complex interface. |
 | **Tastytrade** | Options-focused live trading | Excellent for condors specifically. Low per-contract fees. Not ideal for automation later. |
 

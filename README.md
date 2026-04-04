@@ -9,6 +9,54 @@ The system sends email alerts, runs historical backtests, trades automatically o
 
 ---
 
+## Do I need an Alpaca account?
+
+**No — Alpaca is optional.** Most of the system works without it:
+
+| What you can do without Alpaca | What requires Alpaca |
+|---|---|
+| Run backtests (full historical simulation) | Portfolio Overview page |
+| Research Sandbox — explore factor weights | Automated rebalancing |
+| Signal scanning — see today's ranked stocks | Automated stop-loss replacement |
+| Email alerts | Placing live or paper trades |
+| All charts — equity curve, drawdown, Sharpe | Put option order placement |
+
+If you don't have an Alpaca account, leave the three Alpaca lines blank in your `.env`
+file. The dashboard will show your config on the Portfolio Overview page instead of live
+positions, and everything else works normally.
+
+### What is Alpaca?
+
+Alpaca (alpaca.markets) is a commission-free brokerage with a free API — meaning you can
+write code that places real trades automatically. It also offers **paper trading**: a
+simulated account loaded with $100,000 of fake money where you can test automated
+strategies without risking anything real. That's what this system uses by default.
+
+Paper trading on Alpaca is completely free and takes about 5 minutes to set up.
+
+### How to get an Alpaca account
+
+1. Go to **alpaca.markets** and click "Get Started" — it's free
+2. Create an account (email + password, no credit card needed)
+3. You land in the paper trading dashboard automatically
+4. Click your account name (top right) → **API Keys** → **Generate New Key**
+5. Copy the API Key and Secret Key — you only see the secret once, save it immediately
+6. Add them to your `.env` file:
+```
+ALPACA_API_KEY=PKXXXXXXXXXXXXXXXX
+ALPACA_SECRET_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+ALPACA_BASE_URL=https://paper-api.alpaca.markets
+```
+
+That's it. The system connects to your paper account, places simulated trades, and tracks
+performance — all with fake money until you decide to go live.
+
+> **Going live with real money:** Change `ALPACA_BASE_URL` to `https://api.alpaca.markets`
+> and fund a live account at alpaca.markets. Everything else stays the same. Only do this
+> after running the paper account long enough to trust the system.
+
+---
+
 ## Quick Start
 
 ### 0. Get the code
