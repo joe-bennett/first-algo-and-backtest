@@ -2,7 +2,7 @@
 
 An automated trading system built around two strategies:
 
-- **120/20 Value-Momentum** — ranks S&P 500 stocks by a blend of value and momentum factors, goes long the top-ranked and short the bottom-ranked, rebalances monthly or quarterly (changable)
+- **120/20 Value-Momentum** — ranks S&P 500 stocks by a blend of value, momentum, and quality factors; goes long the top-ranked and short the bottom-ranked; rebalances quarterly (configurable). Supports concentration mode (top 10–15 names at 8–12% each) and puts on the short book (OTM put contracts on highest-conviction shorts for convex downside exposure).
 - **Iron Condor (opportunistic)** — scans for elevated implied volatility and alerts when conditions are right to sell premium
 
 The system sends email alerts, runs historical backtests, trades automatically on Alpaca paper, and has a Streamlit dashboard for analysis.
@@ -10,6 +10,13 @@ The system sends email alerts, runs historical backtests, trades automatically o
 ---
 
 ## Quick Start
+
+### 0. Get the code
+```bash
+git clone https://github.com/joe-bennett/first-algo-and-backtest.git
+cd first-algo-and-backtest
+```
+Requires **Python 3.10 or later** (`python --version` to check).
 
 ### 1. Install dependencies
 ```bash
@@ -51,7 +58,7 @@ streamlit run dashboard/app.py
 
 **Option C — from anywhere in PowerShell** (one-time setup, adds a shortcut to your profile):
 ```powershell
-Add-Content $PROFILE "`nfunction start-dashboard { Set-Location 'C:\path\to\first-algo-and-backtest'; streamlit run dashboard/app.py }"
+Add-Content $PROFILE "`nfunction start-dashboard { Set-Location 'C:\Users\YourName\path\to\first-algo-and-backtest'; streamlit run dashboard/app.py }"
 ```
 Replace the path with wherever you cloned the repo. After that, typing `start-dashboard` in any PowerShell window opens the dashboard.
 
@@ -73,11 +80,18 @@ Backtests use **point-in-time fundamentals** via SimFin — P/E, P/B, FCF Yield,
 Backtests also use **point-in-time index membership** — at each rebalance date, only stocks that were actually in the S&P 500 on that date are eligible. This eliminates survivorship bias (the distortion from only including companies that survived to today).
 
 The strategy scores each stock on three factors:
-- **Value** (34%): P/E, P/B, FCF yield, EV/EBITDA — cheaper is better
-- **Momentum** (33%): 12-month price return skipping the last month — uses 5-day averages at reference points to reduce single-day noise
-- **Quality** (33%): ROE, net profit margin, debt/equity — profitable, low-leverage companies score higher
 
-With **sector neutralization** enabled (default), each factor is ranked within GICS sector. This prevents the portfolio from concentrating in a single sector (e.g., buying only cheap energy stocks when energy is out of favor).
+- **Value** (40%): P/E ratio, P/B ratio, FCF yield, EV/EBITDA — how cheap is the stock relative to its earnings, assets, and cash flow
+- **Momentum** (40%): 12-month price return skipping the last month (avoids short-term reversal) — uses 5-day averages at reference points to reduce single-day noise
+- **Quality** (20%): ROE, net profit margin, debt/equity ratio — profitable, efficiently-run, low-leverage businesses score higher
+
+Each raw number is converted to a **percentile rank** (0–1) within the universe before
+blending — so a stock's score reflects its rank relative to all other stocks today, not an
+absolute threshold. This makes scores comparable across sectors and across time.
+For a full explanation of how this works, see **[GUIDE.md — Section 4](GUIDE.md#4-how-the-strategy-scores-stocks)**.
+
+With **sector neutralization** enabled, each factor is ranked within GICS sector rather
+than globally. This prevents the portfolio from concentrating in a single sector.
 
 You can also run backtests directly from Python for more control:
 ```python
@@ -154,6 +168,27 @@ strategy:
   long_pct: 0.20    # long the top 20% of ranked stocks
   short_pct: 0.20   # short the bottom 20% of ranked stocks
 ```
+
+### Concentrate to highest-conviction names (aggressive mode)
+```yaml
+concentration:
+  top_n_longs: 15    # hold only the top 15 longs at ~8% each (null = diversified default)
+  top_n_shorts: 10   # hold only the bottom 10 shorts at ~2% each
+```
+Default behavior spreads across ~100 longs at 1.2% each. Concentration amplifies returns
+and drawdowns — always backtest before going live with a concentrated setting.
+
+### Use put options on the short book (highest-conviction shorts)
+```yaml
+short_book_puts:
+  enabled: true       # buy OTM puts on bottom conviction_n names instead of shorting shares
+  conviction_n: 10    # how many of the most extreme shorts get put contracts
+  dte: 90             # ~3 months to expiration
+  premium_pct: 0.003  # spend 0.3% of portfolio per put position (10 puts = 3% total)
+```
+Puts give convex payoff on big down moves with no short squeeze risk. Requires
+Alpaca options trading enabled on your account. Backtests treat PUT signals as regular
+short positions (directional proxy only — actual options payoff needs IV history to model).
 
 ### Adjust the stop-loss
 ```yaml

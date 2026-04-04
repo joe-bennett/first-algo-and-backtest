@@ -76,11 +76,27 @@ def run_backtest(
 
     print(f"Running backtest: {start} to {end}")
     blend = cfg["score_blend"]
+    concentration = cfg.get("concentration", {})
+    conc_longs  = concentration.get("top_n_longs")
+    conc_shorts = concentration.get("top_n_shorts")
+    conc_note = (
+        f"concentrated (top {conc_longs}L / {conc_shorts}S)"
+        if (conc_longs or conc_shorts)
+        else "diversified (pct-based)"
+    )
+    puts_enabled = cfg.get("short_book_puts", {}).get("enabled", False)
+    if puts_enabled:
+        print(
+            "  Note: short_book_puts.enabled=true — PUT signals are simulated as short positions "
+            "(same directional exposure, 1:1 payoff). The convex upside of real put options and "
+            "theta decay cannot be backtested without implied volatility history."
+        )
     print(f"Config: rebalance={cfg['strategy']['rebalance_frequency']}, "
           f"value/momentum/quality blend="
           f"{blend['value_weight']:.0%}/{blend['momentum_weight']:.0%}/{blend.get('quality_weight', 0):.0%}, "
           f"short_book={'on' if cfg.get('enable_short_book', True) else 'off'}, "
-          f"sector_neutral={'on' if cfg.get('sector_neutral', False) else 'off'}")
+          f"sector_neutral={'on' if cfg.get('sector_neutral', False) else 'off'}, "
+          f"sizing={conc_note}")
 
     # --- Determine universe preset from config ---
     with open(CONFIG_DIR / "universe.yaml", encoding="utf-8") as _f:

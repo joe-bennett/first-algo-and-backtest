@@ -6,6 +6,14 @@ Handles:
   - Fetching current positions and portfolio value
   - Placing and canceling orders
   - Rebalancing based on signal output from strategies
+
+Put option orders (for short_book_puts mode):
+  find_put_contract() uses yfinance to locate the best matching put contract
+  (closest to target DTE and ~10% OTM as a proxy for ~30-delta).
+  place_put_order() buys that contract on Alpaca, sized by premium_pct of portfolio value.
+  Requires options trading enabled on your Alpaca account.
+  Option positions are NOT automatically closed during rebalance — manage them manually
+  or set a GTC limit order at 2x premium (profit target) when entering.
 """
 
 import os
@@ -125,16 +133,131 @@ def cancel_all_orders() -> None:
     get_client().cancel_orders()
 
 
+def find_put_contract(ticker: str, target_dte: int = 90, otm_pct: float = 0.10) -> dict | None:
+    """
+    Find the best matching put contract for a given ticker using yfinance option chains.
+
+    Selects the expiry date closest to target_dte days out, then finds the put strike
+    closest to (current_price * (1 - otm_pct)).  otm_pct=0.10 gives ~10% OTM, which is
+    a reasonable proxy for a ~30-delta put on an average S&P 500 stock.
+
+    Returns a dict with: symbol (OCC format), strike, expiry, ask_price
+    Returns None if no suitable contract is found.
+    """
+    import yfinance as yf
+    from datetime import date, timedelta
+
+    try:
+        yf_ticker = yf.Ticker(ticker)
+        expiries = yf_ticker.options
+        if not expiries:
+            print(f"  {ticker}: no option expiries available")
+            return None
+
+        # Find expiry date closest to target_dte
+        today = date.today()
+        target_date = today + timedelta(days=target_dte)
+        best_expiry = min(expiries, key=lambda e: abs((date.fromisoformat(e) - target_date).days))
+
+        chain = yf_ticker.option_chain(best_expiry)
+        puts = chain.puts.copy()
+        if puts.empty:
+            print(f"  {ticker}: no put contracts for expiry {best_expiry}")
+            return None
+
+        current_price = yf_ticker.fast_info["last_price"]
+        target_strike = current_price * (1 - otm_pct)
+
+        puts["strike_diff"] = (puts["strike"] - target_strike).abs()
+        best = puts.nsmallest(1, "strike_diff").iloc[0]
+
+        ask = float(best["ask"]) if float(best["ask"]) > 0 else float(best["lastPrice"])
+        if ask <= 0:
+            print(f"  {ticker}: could not determine put ask price")
+            return None
+
+        return {
+            "symbol": best["contractSymbol"],
+            "strike": float(best["strike"]),
+            "expiry": best_expiry,
+            "ask":    ask,
+        }
+
+    except Exception as e:
+        print(f"  {ticker}: error finding put contract — {e}")
+        return None
+
+
+def place_put_order(ticker: str, portfolio_value: float, puts_cfg: dict) -> dict | None:
+    """
+    Buy a put option contract on the given ticker, sized to puts_cfg["premium_pct"] of portfolio.
+
+    puts_cfg keys used:
+        dte         : target days to expiration (default 90)
+        target_delta: used to derive OTM % (0.30 delta ≈ 10% OTM, default)
+        premium_pct : fraction of portfolio to spend per position (default 0.003 = 0.3%)
+
+    Requires Alpaca options trading enabled on the account.
+    Returns order metadata dict, or None if the contract could not be found or order failed.
+    """
+    target_dte  = int(puts_cfg.get("dte", 90))
+    premium_pct = float(puts_cfg.get("premium_pct", 0.003))
+
+    contract = find_put_contract(ticker, target_dte=target_dte, otm_pct=0.10)
+    if not contract:
+        return None
+
+    budget    = portfolio_value * premium_pct
+    contracts = max(1, int(budget / (contract["ask"] * 100)))  # 100 shares per contract
+
+    try:
+        client = get_client()
+        req = MarketOrderRequest(
+            symbol=contract["symbol"],
+            qty=contracts,
+            side=OrderSide.BUY,
+            time_in_force=TimeInForce.DAY,
+        )
+        order = client.submit_order(req)
+        print(
+            f"  Put order placed: BUY {contracts}x {contract['symbol']} "
+            f"(strike ${contract['strike']:.2f}, exp {contract['expiry']}, "
+            f"ask ~${contract['ask']:.2f}/share, budget ${budget:.0f})"
+        )
+        return {
+            "id":        str(order.id),
+            "ticker":    ticker,
+            "side":      "buy_put",
+            "symbol":    contract["symbol"],
+            "contracts": contracts,
+            "strike":    contract["strike"],
+            "expiry":    contract["expiry"],
+        }
+    except Exception as e:
+        print(f"  Put order FAILED for {ticker}: {e}")
+        return None
+
+
 def rebalance(signals, dry_run: bool = False) -> list[dict]:
     """
     Rebalance the paper portfolio to match strategy signals.
 
     signals: DataFrame with columns [ticker, action, weight]
-      action: 'BUY' (long) or 'SHORT' (short)
-      weight: positive for longs, negative for shorts (e.g. 0.012 = 1.2%)
+      action: 'BUY' (long), 'SHORT' (short shares), or 'PUT' (buy put options)
+      weight: positive for longs, negative for shorts/puts (e.g. 0.012 = 1.2%)
+
+    PUT signals:
+      Calls place_put_order() to buy OTM put contracts instead of short-selling shares.
+      Put positions are NOT automatically closed during subsequent rebalances — manage
+      them manually (close at 2x premium profit or at 21 DTE).
 
     Returns list of orders placed.
     """
+    import yaml
+    with open(_CONFIG_PATH, encoding="utf-8") as _f:
+        cfg = yaml.safe_load(_f)
+    puts_cfg = cfg.get("short_book_puts", {})
+
     acct = get_account()
     portfolio_value = acct["portfolio_value"]
     current_positions = get_positions()
@@ -142,15 +265,20 @@ def rebalance(signals, dry_run: bool = False) -> list[dict]:
     print(f"\nPortfolio value: ${portfolio_value:,.2f}")
     print(f"Current positions: {len(current_positions)}")
 
-    # Build target position map: ticker -> dollar value (negative = short)
+    # Separate PUT signals from equity signals
+    put_signals    = signals[signals["action"] == "PUT"]
+    equity_signals = signals[signals["action"].isin(["BUY", "SHORT"])]
+
+    # Build target position map for equity only: ticker -> dollar value (negative = short)
     target = {}
-    for _, row in signals.iterrows():
+    for _, row in equity_signals.iterrows():
         dollar_value = portfolio_value * abs(row["weight"])
         target[row["ticker"]] = dollar_value if row["action"] == "BUY" else -dollar_value
 
     orders = []
 
-    # Close positions no longer in signals
+    # Close equity positions no longer in signals
+    # Note: option positions (OCC symbols) are not tracked here — close puts manually
     for ticker, pos in current_positions.items():
         if ticker not in target:
             qty = abs(pos["qty"])
@@ -161,11 +289,10 @@ def rebalance(signals, dry_run: bool = False) -> list[dict]:
             else:
                 orders.append(place_order(ticker, qty, close_side, reason))
 
-    # Open or adjust positions in signals
+    # Open or adjust equity positions
     for ticker, target_dollars in target.items():
         is_long = target_dollars > 0
 
-        # Fetch current price via yfinance for share qty calculation
         try:
             import yfinance as yf
             price = yf.Ticker(ticker).fast_info["last_price"]
@@ -186,7 +313,7 @@ def rebalance(signals, dry_run: bool = False) -> list[dict]:
                 print(f"  {ticker}: already sized correctly, skipping.")
                 continue
 
-        # Close existing position if on wrong side
+        # Close existing equity position if on wrong side
         if current and current_side != ("long" if is_long else "short"):
             close_side = "sell" if current_side == "long" else "buy"
             if dry_run:
@@ -194,7 +321,7 @@ def rebalance(signals, dry_run: bool = False) -> list[dict]:
             else:
                 orders.append(place_order(ticker, current_qty, close_side, "flip side"))
 
-        # Place new order
+        # Place equity order
         side = "buy" if is_long else "sell"
         reason = f"target weight {target_dollars/portfolio_value*100:.1f}%"
         stop_loss_pct = _get_stop_loss_pct()
@@ -203,5 +330,27 @@ def rebalance(signals, dry_run: bool = False) -> list[dict]:
             print(f"  [DRY RUN] Would {side.upper()} {target_qty:.4f} {ticker} @ ~${price:.2f}{stop_note} — {reason}")
         else:
             orders.append(place_order(ticker, target_qty, side, price=price, reason=reason))
+
+    # Place put option orders for PUT signals
+    if not put_signals.empty:
+        print(f"\nPlacing put orders for {len(put_signals)} conviction short(s)...")
+        for _, row in put_signals.iterrows():
+            ticker = row["ticker"]
+            if dry_run:
+                contract = find_put_contract(ticker, target_dte=puts_cfg.get("dte", 90))
+                budget = portfolio_value * puts_cfg.get("premium_pct", 0.003)
+                if contract:
+                    contracts = max(1, int(budget / (contract["ask"] * 100)))
+                    print(
+                        f"  [DRY RUN] Would BUY {contracts}x {contract['symbol']} "
+                        f"(strike ${contract['strike']:.2f}, exp {contract['expiry']}, "
+                        f"ask ~${contract['ask']:.2f}, budget ${budget:.0f})"
+                    )
+                else:
+                    print(f"  [DRY RUN] Could not find put contract for {ticker}")
+            else:
+                result = place_put_order(ticker, portfolio_value, puts_cfg)
+                if result:
+                    orders.append(result)
 
     return orders

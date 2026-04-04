@@ -108,20 +108,44 @@ def run_equity_scan(dry_run: bool = False) -> pd.DataFrame:
 
     # Build email message
     date_str = datetime.today().strftime("%Y-%m-%d")
-    lines = [f"=== PORTFOLIO SIGNAL: {date_str} ===\n"]
 
-    longs = signals[signals["action"] == "BUY"].head(5)
+    # Count each action type for the header summary
+    n_longs  = len(signals[signals["action"] == "BUY"])
+    n_shorts = len(signals[signals["action"] == "SHORT"])
+    n_puts   = len(signals[signals["action"] == "PUT"])
+    short_summary = f"{n_shorts} short shares"
+    if n_puts:
+        short_summary += f" + {n_puts} put contracts"
+
+    lines = [
+        f"=== PORTFOLIO SIGNAL: {date_str} ===\n",
+        f"Long book: {n_longs} positions | Short book: {short_summary}\n",
+    ]
+
+    longs  = signals[signals["action"] == "BUY"].head(5)
     shorts = signals[signals["action"] == "SHORT"].head(5)
+    puts   = signals[signals["action"] == "PUT"].head(5)
 
     lines.append("--- TOP 5 LONGS ---")
     for _, row in longs.iterrows():
         lines.append(strategy.describe_signal(row))
         lines.append("")
 
-    lines.append("--- TOP 5 SHORTS ---")
-    for _, row in shorts.iterrows():
-        lines.append(strategy.describe_signal(row))
-        lines.append("")
+    if not shorts.empty:
+        lines.append("--- TOP 5 SHORTS (short shares) ---")
+        for _, row in shorts.iterrows():
+            lines.append(strategy.describe_signal(row))
+            lines.append("")
+
+    if not puts.empty:
+        lines.append("--- TOP 5 CONVICTION SHORTS (via put options) ---")
+        lines.append(
+            "  These are the most extreme bottom-ranked names. "
+            "Put contracts give convex downside exposure without short squeeze risk.\n"
+        )
+        for _, row in puts.iterrows():
+            lines.append(strategy.describe_signal(row))
+            lines.append("")
 
     message = "\n".join(lines)
 

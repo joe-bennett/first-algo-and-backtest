@@ -33,6 +33,45 @@ score_blend:
 # Short book toggle — set to false to run long-only (100% long, no shorting)
 enable_short_book: true
 
+# ── Concentration mode ─────────────────────────────────────────────────────────
+# By default long/short books are sized by percentage of the ranked universe
+# (long_pct / short_pct above). Concentration mode overrides those percentages
+# with a fixed stock count, putting more capital behind your highest-conviction names.
+#
+# null  = use long_pct / short_pct percentages (diversified default)
+# 15    = concentrate to top 15 longs; each = long_weight / 15 = 8% of portfolio
+# 10    = concentrate to top 10 longs; each = 12% of portfolio (most aggressive)
+#
+# Run a backtest after changing these — concentration amplifies both alpha and drawdowns.
+concentration:
+  top_n_longs: null        # null = use long_pct; integer = fixed count (e.g. 15)
+  top_n_shorts: null       # null = use short_pct; integer = fixed count (e.g. 10)
+
+# ── Puts on the short book ─────────────────────────────────────────────────────
+# Instead of short-selling shares for the highest-conviction shorts, buy OTM put options.
+#
+# Why puts instead of shorts:
+#   - Convex payoff: a 40% drop on a short returns 40%; the same drop on a put can return 3-5x
+#   - No short squeeze risk: max loss is the premium paid, not unlimited
+#   - No borrow fees on hard-to-borrow names
+#
+# The tradeoff: puts decay every day (theta). You must be right AND within the DTE window.
+# Sideways drift = premium loss. Shorts have no such time pressure.
+#
+# When enabled, the bottom `conviction_n` stocks by composite score get put contracts
+# instead of short shares. Any remaining shorts beyond conviction_n use regular short selling.
+#
+# Requires Alpaca options trading enabled on your account.
+# In backtests, put signals are treated as short positions (directional proxy only —
+# the convex payoff and theta decay cannot be accurately backtested without IV history).
+short_book_puts:
+  enabled: false           # true = buy puts on conviction_n shorts; false = short shares (default)
+  conviction_n: 10         # number of most-extreme bottom-ranked stocks to buy puts on
+  target_delta: 0.30       # target option delta (~30 delta = moderately OTM, ~10% below spot)
+  dte: 90                  # target days to expiration (3 months gives time to be right)
+  premium_pct: 0.003       # spend this fraction of portfolio per put position (0.3% each)
+                           # 10 puts × 0.3% = 3.0% total premium outlay
+
 # Sector neutralization — rank stocks within GICS sector rather than globally
 # OFF by default: sector neutral kills the value signal by forcing one stock per sector
 # regardless of how cheap or expensive sectors are relative to each other.

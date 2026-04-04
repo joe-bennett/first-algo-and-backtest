@@ -11,7 +11,9 @@ and how to make common changes without needing to touch code.
 1. [First-Time Setup](#1-first-time-setup)
 2. [Daily Use — How to Run Things](#2-daily-use)
 3. [The Dashboard](#3-the-dashboard)
-4. [Changing Strategy Parameters](#4-changing-strategy-parameters)
+4. [How the Strategy Scores Stocks](#4-how-the-strategy-scores-stocks)
+   - Raw factors, percentile ranking, composite score assembly, sector neutralization
+4b. [Changing Strategy Parameters](#4b-changing-strategy-parameters)
 5. [Changing Your Universe](#5-changing-your-universe)
 6. [Changing Your Alert Settings](#6-changing-your-alert-settings)
 7. [Running a Backtest](#7-running-a-backtest)
@@ -37,16 +39,21 @@ You need two separate things running in parallel:
 
 ### What kind of brokerage account you need
 
-For this strategy you need two specific account features:
+For this strategy you need up to three account features depending on what you run:
 
 | Feature | Why you need it | Without it |
 |---|---|---|
-| **Margin account** | Required to short stocks (the 20% short side of 120/20) | You can only trade the long book |
-| **Options approval Level 2** | Required for spreads like iron condors | You cannot trade condors |
+| **Margin account** | Required to short stocks (the 20% short side of 120/20) | Long book only; disable `enable_short_book` |
+| **Options approval Level 1** | Required to buy put contracts (`short_book_puts`) | Cannot use puts on the short book; use regular shorts instead |
+| **Options approval Level 2** | Required for multi-leg spreads like iron condors | Cannot trade condors |
 
-Most brokers approve Level 2 options without difficulty — you just need to answer
-questions about your experience and income when applying. Margin requires a minimum
-account balance (usually $2,000, but $25,000+ is practical — see below).
+Most brokers approve Level 1 (buying options) and Level 2 (spreads) without difficulty —
+you answer questions about your experience and income when applying. Margin requires a
+minimum account balance (usually $2,000, but $25,000+ is practical — see below).
+
+You can run this strategy without options at all: set `enable_short_book: true` with
+`short_book_puts.enabled: false` and skip the iron condor scanner. The equity strategy
+is fully functional without any options approval.
 
 ---
 
@@ -84,13 +91,14 @@ There is no hard minimum, but here is the practical reality:
 
 | Capital | What's feasible |
 |---|---|
-| **$5,000 – $10,000** | Longs only, top 10–15 positions. Skip the short book for now. |
-| **$25,000 – $50,000** | Full long book, partial short book. Above PDT threshold. |
-| **$50,000+** | Full 120/20 strategy as designed — long and short book with reasonable position sizing. |
-| **$100,000+** | Full strategy including condors with meaningful position sizes. |
+| **$5,000 – $10,000** | Longs only. Use concentration mode (`top_n_longs: 10`) for manageable position count. |
+| **$25,000 – $50,000** | Full long book + short book. Above PDT threshold. Consider concentration (top 15–20 longs). |
+| **$50,000+** | Full 120/20 strategy — long and short book with reasonable position sizing. |
+| **$100,000+** | Full strategy including condors and/or puts on short book with meaningful sizes. |
 
-The strategy works at any size — smaller just means fewer positions and
-higher concentration risk per stock.
+The strategy works at any size. Smaller accounts benefit from concentration mode —
+fewer positions, each one large enough to matter, without needing $100k to build
+100 equally-sized positions.
 
 ---
 
@@ -170,13 +178,22 @@ The email will eventually include a "current vs. target" comparison to make this
 
 ## 1. First-Time Setup
 
+### Step 0 — Get the code
+```bash
+git clone https://github.com/joe-bennett/first-algo-and-backtest.git
+cd first-algo-and-backtest
+```
+Requires **Python 3.10 or later**. Check your version with `python --version`.
+If you need to install Python, download from python.org — make sure to check
+"Add Python to PATH" during installation on Windows.
+
 ### Step 1 — Install Python packages
-Open a terminal in this folder and run:
+Open a terminal in the project folder and run:
 ```
 pip install -r requirements.txt
 ```
-This installs everything the system needs (OpenBB for data, VectorBT for backtesting,
-Streamlit for the dashboard, etc.).
+This installs everything the system needs (yfinance for data, VectorBT for backtesting,
+Streamlit for the dashboard, alpaca-py for paper trading, etc.).
 
 ### Step 2 — Set up Gmail for alerts
 1. Use a Gmail account to send alerts from
@@ -263,7 +280,133 @@ without running a full backtest. Good for fast "what if" exploration.
 
 ---
 
-## 4. Changing Strategy Parameters
+## 4. How the Strategy Scores Stocks
+
+Before changing parameters, it helps to understand exactly how a stock gets its score.
+Everything below is a plain-English description of `strategies/value_momentum_120_20.py`.
+
+### Step 1 — Gather raw data for every stock in the universe
+
+For each stock in the S&P 500 the system collects:
+
+| Data point | Source | What it measures |
+|---|---|---|
+| P/E ratio | SimFin / yfinance | Price paid per $1 of earnings |
+| P/B ratio | SimFin / yfinance | Price paid per $1 of book value (assets minus liabilities) |
+| FCF yield | SimFin / yfinance | Free cash flow generated per $1 of market cap |
+| EV/EBITDA | SimFin / yfinance | Total firm cost (debt + equity) vs. operating earnings |
+| ROE | SimFin / yfinance | Net income earned per $1 of shareholders' equity |
+| Net profit margin | SimFin / yfinance | Fraction of each dollar of revenue that becomes profit |
+| Debt/equity ratio | SimFin / yfinance | Total debt relative to equity — a leverage measure |
+| 12-1 month price return | yfinance | Price 1 month ago ÷ price 12 months ago minus 1 |
+
+The momentum calculation uses a **5-day average** around each reference point (±2 trading
+days) rather than a single day's price. This prevents one unusually volatile day from
+distorting a full year of price history.
+
+---
+
+### Step 2 — Convert every raw number to a percentile rank (0–1)
+
+Raw numbers can't be meaningfully compared across factors or across time. A P/E of 20
+might be cheap in 2022 and expensive in 2015. A tech stock at P/E 25 is cheap for tech;
+an oil stock at P/E 25 is expensive for energy.
+
+**Percentile ranking solves this** by asking: *how does this stock rank compared to every
+other stock in the universe right now?*
+
+Line up all 500 stocks by P/E from lowest to highest:
+```
+Cheapest P/E  → rank 0.01  (1st percentile)
+Median P/E    → rank 0.50
+Most expensive → rank 0.99  (99th percentile)
+```
+
+For factors where **lower is better** (P/E, P/B, EV/EBITDA, debt/equity), the rank is
+**inverted** — the cheapest stock gets a score of 1.0, the most expensive gets 0.0.
+
+For factors where **higher is better** (FCF yield, ROE, net margin, momentum), higher values
+get higher scores directly.
+
+**Example:**
+
+| Stock | Raw P/E | Position in universe | Raw rank | Inverted (value score) |
+|---|---|---|---|---|
+| XOM | 11 | 8th cheapest of 500 | 0.016 | **0.984** |
+| AAPL | 28 | 350th cheapest | 0.700 | **0.300** |
+| MSFT | 35 | 420th cheapest | 0.840 | **0.160** |
+
+XOM gets a near-perfect value sub-score not because P/E 11 is a magic threshold — it's
+because XOM is cheaper than 98% of the universe today. If P/Es compress market-wide next
+year, XOM's raw P/E might be 9 and AAPL might be 22, but their relative scores would be
+similar because the ranking is always relative to the current universe.
+
+---
+
+### Step 3 — Build composite scores within each factor category
+
+Each of the three categories blends its ranked sub-factors into a single score:
+
+**Value score** (four sub-factors, weights from `value_factors` in portfolio.yaml):
+```
+value_score = 0.30 × pe_rank  +  0.25 × pb_rank  +  0.25 × fcf_rank  +  0.20 × ev_rank
+```
+
+**Momentum score** (single factor — no blending needed):
+```
+momentum_score = rank of 12-1 month return
+```
+
+**Quality score** (three sub-factors, weights from `quality_factors`):
+```
+quality_score = 0.40 × roe_rank  +  0.40 × margin_rank  +  0.20 × debt_equity_rank
+```
+
+All three composite scores end up on the same 0–1 scale. A score of 0.85 means the
+stock ranks in the top 15% on that factor across the entire universe.
+
+---
+
+### Step 4 — Blend into one final composite score
+
+```
+composite = 0.40 × value_score  +  0.40 × momentum_score  +  0.20 × quality_score
+```
+
+(weights from `score_blend` in portfolio.yaml — you can change them)
+
+The top 20% of composite scores become the **long book**. The bottom 20% become the
+**short book** (or put candidates if `short_book_puts` is enabled).
+
+---
+
+### Step 5 — Sector neutralization (optional)
+
+When `sector_neutral: true`, Steps 2 and 3 happen **within each GICS sector** rather than
+across the whole universe. A tech stock's P/E is ranked against other tech stocks only.
+
+This prevents the entire long book from loading up in one sector. If energy is universally
+cheap on P/E right now, global ranking might put 30 energy stocks in the top 20%. Sector
+neutralization ensures no one sector dominates by forcing each sector to contribute
+roughly proportionally to the long and short books.
+
+Default is `false` because sector neutralization removes the ability to bet on cheap
+sectors vs. expensive sectors — a legitimate source of return.
+
+---
+
+### What this means practically
+
+- **Composite score of 0.85** → ranks in the top 15% of the universe on the blended signal
+- **Composite score of 0.50** → median; doesn't have a strong signal either way
+- **Composite score of 0.10** → ranks in the bottom 10%; strong short/put candidate
+- The score is always relative to today's universe, not an absolute threshold
+- Changing factor weights in `portfolio.yaml` shifts which kind of stocks rank highly —
+  run a backtest after any change to see the historical impact
+
+---
+
+## 4b. Changing Strategy Parameters
 
 **All strategy parameters live in one file: `config/portfolio.yaml`**
 Open it in any text editor. The key sections:
@@ -331,6 +474,72 @@ enable_short_book: true   ← 120% long / 20% short (full strategy)
 ```
 Turn off shorting if your broker doesn't support short selling or if you want to
 reduce risk. The long book is identical either way — only the short positions change.
+
+### Concentration mode
+```yaml
+concentration:
+  top_n_longs: null    ← null = use long_pct percentage (default: top 20%)
+  top_n_shorts: null   ← null = use short_pct percentage (default: bottom 20%)
+```
+By default the portfolio spreads across the top 20% of ranked stocks (~100 names at 1.2% each).
+Concentration mode overrides this with a fixed count so more capital goes to your
+highest-conviction picks.
+
+| Setting | Long count | Position size | Character |
+|---|---|---|---|
+| `top_n_longs: null` | ~100 names | ~1.2% each | Diversified (default) |
+| `top_n_longs: 15` | 15 names | ~8% each | Aggressive |
+| `top_n_longs: 10` | 10 names | ~12% each | Very aggressive |
+
+**The tradeoff:** Your ranking signal is strongest at the extremes — the top 15 stocks
+rank higher than the average of the top 100. Concentration lets that signal actually matter.
+But a single bad pick has much larger impact. Run a backtest before going live with
+concentrated sizing to see how it affects drawdowns.
+
+You can control longs and shorts independently:
+```yaml
+concentration:
+  top_n_longs: 15    ← concentrate longs to top 15
+  top_n_shorts: null ← keep shorts diversified (percentage-based)
+```
+
+The dashboard Backtest page has a "Concentration mode" toggle that lets you backtest
+different counts without editing the YAML file.
+
+### Puts on the short book
+```yaml
+short_book_puts:
+  enabled: false        ← true = buy put contracts on conviction shorts
+  conviction_n: 10      ← number of most-extreme shorts to buy puts on
+  target_delta: 0.30    ← target option delta (~30 delta = moderately OTM)
+  dte: 90               ← days to expiration (3 months)
+  premium_pct: 0.003    ← spend 0.3% of portfolio per put position
+```
+When `enabled: true`, the bottom `conviction_n` stocks by composite score get **OTM
+put options** instead of short shares. Any additional short candidates (beyond
+conviction_n) still use regular short selling.
+
+**Why puts instead of shorting shares:**
+- A 40% stock drop on a short position returns 40%. The same drop on a put can return 3–5x.
+- No short squeeze risk — your max loss is the premium paid, not unlimited.
+- No borrow fees on hard-to-borrow or expensive-to-borrow names.
+
+**The tradeoff:** Puts decay every day (theta). If a stock drifts sideways for 3 months,
+the put expires worthless. A short position has no such time pressure — you can hold it for
+a year waiting to be right. Use puts on your *most extreme* conviction shorts where you
+expect a real move, not just gradual underperformance.
+
+**Managing put positions:**
+- Set a GTC limit order to close at 2x the premium paid (profit target).
+- Always close by 21 DTE regardless — time decay accelerates in the final weeks.
+- The system does NOT automatically close puts during rebalance — you must manage them.
+
+**Backtesting note:** In backtests, PUT signals are treated as regular short positions
+(same directional exposure, 1:1 payoff). The convex upside of real put options cannot be
+reproduced without implied volatility history. The backtest tells you the directional edge
+of the signal; use the live system to evaluate the actual options payoff.
+
+**Requirements:** Alpaca options trading must be enabled on your account.
 
 ### Iron condor thresholds and sizing
 ```yaml
@@ -504,15 +713,38 @@ Open any `.html` file in your browser to view it later.
 ```
 === PORTFOLIO SIGNAL: 2026-03-24 ===
 
+Long book: 15 positions | Short book: 5 short shares + 10 put contracts
+
 --- TOP 5 LONGS ---
-LONG AAPL @ 1.2% of portfolio
-  Composite score: 0.82 (value: 0.71, momentum: 0.93)
-  P/E 24.1 | P/B 3.2 | FCF yield 4.1%
+LONG AAPL @ 8.0% of portfolio
+  Composite score: 0.82 (value: 0.71, momentum: 0.93, quality: 0.77)
+  P/E 24.1 | P/B 3.2 | FCF yield 4.1% | ROE 28.1% | Margin 24.2%
+  WHY: AAPL ranks highly because it is cheap on fundamentals and high-quality.
   HOW: Buy market order at open
+
+--- TOP 5 SHORTS (short shares) ---
+SHORT XYZ @ 0.2% of portfolio
+  ...
+  HOW: Sell short at market open
+
+--- TOP 5 CONVICTION SHORTS (via put options) ---
+  These are the most extreme bottom-ranked names. Put contracts give convex downside
+  exposure without short squeeze risk.
+
+PUT ABC @ 0.2% of portfolio
+  Composite score: 0.08 (value: 0.12, momentum: 0.09, quality: 0.11)
+  ...
+  WHY: ABC ranks poorly because it is expensive on fundamentals and weak momentum.
+  HOW: Buy 1 put contract (~30-delta, ~90 DTE) via your options broker.
+       Cost ≈ 0.3% of portfolio per position.
+       Manage: close at 2x premium paid (profit) or at 21 DTE (time stop).
 ```
-- **Composite score**: 0–1 scale. Higher = stronger combined value+momentum signal.
-- **Value/momentum sub-scores**: also 0–1. Shows which factor is driving the ranking.
-- **HOW**: tells you exactly what to do — market order at open, or short sale, etc.
+- **Composite score**: 0–1 scale. Higher = stronger combined signal.
+- **Value/momentum/quality sub-scores**: also 0–1. Shows which factor is driving the ranking.
+- **HOW for longs**: market order at open.
+- **HOW for shorts**: sell short at market open.
+- **HOW for puts**: buy an OTM put contract; the system shows you exactly what to look for.
+  The automated system (Alpaca) finds the contract and places the order for you.
 
 ### Iron condor alert example
 ```
@@ -547,6 +779,8 @@ config/
 
 strategies/
   value_momentum_120_20.py   ← Core equity strategy logic (scoring, ranking, signal generation)
+                               Supports: concentration mode (top_n_longs/shorts), puts on short
+                               book (action="PUT" for most-extreme conviction shorts)
   iron_condor.py             ← Options condor screener
 
 backtesting/
@@ -554,11 +788,23 @@ backtesting/
   results/           ← Saved HTML backtest charts (open in browser)
 
 alerts/
-  engine.py          ← Runs the scan, decides when to fire alerts
+  engine.py          ← Runs the scan, decides when to fire alerts; emails PUT signals
+                       separately from regular shorts with options-specific instructions
   notifier.py        ← Sends alert emails via Gmail
+
+broker/
+  alpaca.py          ← Alpaca paper trading integration (orders, rebalance, stop-loss)
+                       find_put_contract(): locates best matching OTM put via yfinance
+                       place_put_order(): buys put contracts sized to premium_pct of portfolio
+                       rebalance(): routes PUT signals to put orders, equity signals to shares
+  position_manager.py ← Daily stop-loss replacement for equity positions
+  ledger.py          ← Local portfolio ledger; saves data/ledger.csv + data/ledger.json
 
 dashboard/
   app.py             ← Launch this with "streamlit run dashboard/app.py"
+                       Backtest page: concentration mode toggle + top_n sliders
+                       Signals page: PUT signals shown in dedicated section with explanations
+                       Research Sandbox: concentration controls for live signal preview
   charts.py          ← Chart templates (equity curve, drawdown, etc.)
 
 utils/
@@ -637,6 +883,26 @@ Then run a backtest to compare vs. the blended version.
 **Q: How do I run the system on a smaller universe while experimenting?**
 Change `preset: "sp500"` in `config/universe.yaml`. This is much faster for iteration.
 Switch back to `all_us` when you're ready for production runs.
+
+**Q: When should I use concentration mode vs. the default diversified approach?**
+Use concentration when you have high confidence in the ranking signal and want to
+maximize returns. Use diversified (default) when you want smoother returns and lower
+single-stock risk. A good test: run a backtest with `top_n_longs: 15` and compare the
+Sharpe ratio and max drawdown to the default. If the concentrated version has a better
+Sharpe, the signal has genuine edge at the extremes. If the Sharpe drops, the signal
+is noisier and diversification is doing real work.
+
+**Q: How do I enable puts on the short book without enabling concentration?**
+They're independent toggles. Set `short_book_puts.enabled: true` while leaving
+`concentration.top_n_longs: null`. The strategy will still spread across the top 20%
+of ranked stocks for longs, but the bottom `conviction_n` shorts will get put contracts
+instead of shares.
+
+**Q: My put orders are failing. What do I check?**
+1. Confirm your Alpaca account has options trading enabled (paper accounts need this enabled in settings).
+2. Make sure you have enough buying power — options are paid upfront, not on margin.
+3. Check the terminal output for the specific error message from Alpaca.
+4. For paper trading, some option symbols may not be available — try with a more liquid name (SPY, AAPL, MSFT).
 
 **Q: Where do I make changes that require code?**
 Ask Claude in this folder. Claude reads CLAUDE.md at the start of every session

@@ -15,6 +15,18 @@ Sector neutralization (enabled by sector_neutral in config):
   When enabled, each factor is ranked within GICS sector rather than globally. This prevents
   the portfolio from concentrating in a single sector (e.g., buying only cheap energy stocks).
   Requires get_sector_map() from openbb_client — falls back to global ranking if unavailable.
+
+Concentration mode (config: concentration.top_n_longs / top_n_shorts):
+  Overrides the percentage-based long_pct / short_pct with a fixed stock count.
+  e.g., top_n_longs: 15 → hold only the top 15 longs at ~8% each instead of top 20% at ~1.2% each.
+  Amplifies both alpha and drawdowns — the signal must have genuine edge at the extremes.
+
+Puts on the short book (config: short_book_puts.enabled):
+  When enabled, the bottom conviction_n stocks by composite score are marked action="PUT"
+  instead of action="SHORT". The broker layer buys OTM put contracts on these names.
+  Remaining short candidates (beyond conviction_n) still use regular short selling.
+  In backtests, PUT signals are treated as short positions (directional proxy — the convex
+  payoff and theta decay of real options cannot be reproduced without IV history).
 """
 
 import numpy as np
@@ -74,6 +86,16 @@ class ValueMomentum12020(BaseStrategy):
         qf = self.config.get("quality_factors", {"roe": 0.40, "net_margin": 0.40, "debt_equity": 0.20})
         enable_short = self.config.get("enable_short_book", True)
         sector_neutral = self.config.get("sector_neutral", False) and bool(sector_map)
+
+        # Concentration mode: fixed stock count overrides percentage-based sizing
+        concentration = self.config.get("concentration", {})
+        top_n_longs_override  = concentration.get("top_n_longs")   # None = use long_pct
+        top_n_shorts_override = concentration.get("top_n_shorts")  # None = use short_pct
+
+        # Puts on short book: bottom conviction_n get action="PUT" instead of "SHORT"
+        puts_cfg   = self.config.get("short_book_puts", {})
+        use_puts   = puts_cfg.get("enabled", False) and enable_short
+        conviction_n = int(puts_cfg.get("conviction_n", 10))
 
         tickers = list(set(prices.columns) & set(fundamentals.index))
         if not tickers:
@@ -149,12 +171,33 @@ class ValueMomentum12020(BaseStrategy):
         )
         composite = composite.dropna()
 
-        n_long = max(1, int(len(composite) * cfg["long_pct"]))
-        n_short = max(1, int(len(composite) * cfg["short_pct"])) if enable_short else 0
+        # Determine long/short counts — concentration mode overrides percentage sizing
+        if top_n_longs_override:
+            n_long = max(1, int(top_n_longs_override))
+        else:
+            n_long = max(1, int(len(composite) * cfg["long_pct"]))
+
+        if not enable_short:
+            n_short = 0
+        elif top_n_shorts_override:
+            n_short = max(1, int(top_n_shorts_override))
+        else:
+            n_short = max(1, int(len(composite) * cfg["short_pct"]))
 
         sorted_scores = composite.sort_values(ascending=False)
         long_tickers  = sorted_scores.head(n_long).index.tolist()
-        short_tickers = sorted_scores.tail(n_short).index.tolist() if enable_short else []
+        # tail() returns the lowest-scoring stocks in ascending score order;
+        # reverse so index 0 = most extreme short (lowest composite score)
+        short_tickers_all = list(reversed(sorted_scores.tail(n_short).index.tolist())) if enable_short else []
+
+        # Split short list: bottom conviction_n → PUT; remainder → regular SHORT
+        # "Bottom" means the most extreme (lowest composite score) — index 0 after reversal above
+        if use_puts and short_tickers_all:
+            put_tickers   = short_tickers_all[:conviction_n]
+            short_tickers = short_tickers_all[conviction_n:]
+        else:
+            put_tickers   = []
+            short_tickers = short_tickers_all
 
         # Weight allocation: 120/20 when short book on, 100/0 when off
         long_weight  = cfg["long_weight"] / n_long
@@ -177,10 +220,10 @@ class ValueMomentum12020(BaseStrategy):
                 "net_margin": f.loc[t, "net_margin"]  if "net_margin" in f.columns and t in f.index else np.nan,
                 "sector":     sector_map.get(t, ""),
             })
-        for t in short_tickers:
-            rows.append({
+        def _short_row(t: str, action: str) -> dict:
+            return {
                 "ticker":          t,
-                "action":          "SHORT",
+                "action":          action,   # "SHORT" or "PUT"
                 "weight":          round(-short_weight, 4),
                 "composite_score": round(composite[t], 4),
                 "momentum_score":  round(float(momentum_score.get(t, np.nan)), 4),
@@ -192,7 +235,13 @@ class ValueMomentum12020(BaseStrategy):
                 "roe":        f.loc[t, "roe"]         if "roe"         in f.columns and t in f.index else np.nan,
                 "net_margin": f.loc[t, "net_margin"]  if "net_margin" in f.columns and t in f.index else np.nan,
                 "sector":     sector_map.get(t, ""),
-            })
+            }
+
+        for t in short_tickers:
+            rows.append(_short_row(t, "SHORT"))
+
+        for t in put_tickers:
+            rows.append(_short_row(t, "PUT"))
 
         return pd.DataFrame(rows)
 
@@ -211,7 +260,7 @@ class ValueMomentum12020(BaseStrategy):
         nm   = signal_row.get("net_margin",  float("nan"))
         sec  = signal_row.get("sector", "")
 
-        direction = "LONG" if action == "BUY" else "SHORT"
+        direction = "LONG" if action == "BUY" else ("PUT" if action == "PUT" else "SHORT")
         pe_str  = f"P/E {pe:.1f}"        if not (isinstance(pe, float) and np.isnan(pe))  else "P/E N/A"
         pb_str  = f"P/B {pb:.1f}"        if not (isinstance(pb, float) and np.isnan(pb))  else "P/B N/A"
         fcf_str = f"FCF {fcf*100:.1f}%"  if not (isinstance(fcf, float) and np.isnan(fcf)) else "FCF N/A"
@@ -238,10 +287,21 @@ class ValueMomentum12020(BaseStrategy):
 
         why = " and ".join(why_parts)
 
+        if action == "PUT":
+            how = (
+                "Buy 1 put contract (~30-delta, ~90 DTE) via your options broker. "
+                "Cost ≈ 0.3% of portfolio per position. "
+                "Manage: close at 2x premium paid (profit) or at 21 DTE (time stop)."
+            )
+        elif action == "BUY":
+            how = "Buy market order at open"
+        else:
+            how = "Sell short at market open"
+
         return (
             f"{direction} {t}{sec_str} @ {weight:.1f}% of portfolio\n"
             f"  Composite score: {comp:.2f}  (value: {val:.2f}, momentum: {mom:.2f}, quality: {qual:.2f})\n"
             f"  {pe_str} | {pb_str} | {fcf_str} | {roe_str} | {nm_str}\n"
             f"  WHY: {t} ranks {'highly' if action == 'BUY' else 'poorly'} because it is {why}.\n"
-            f"  HOW: {'Buy market order at open' if action == 'BUY' else 'Sell short at market open'}"
+            f"  HOW: {how}"
         )

@@ -150,9 +150,36 @@ elif page == "Backtest":
         enable_short   = st.checkbox("Enable short book", value=True)
         sector_neutral = st.checkbox("Sector neutralization", value=True)
 
+    st.markdown("---")
+    st.subheader("Concentration Mode")
+    st.markdown(
+        "Override the percentage-based sizing with a fixed stock count. "
+        "Fewer names → each position is larger → higher return potential and higher drawdown risk. "
+        "Leave unchecked to use the `long_pct` / `short_pct` sliders above."
+    )
+    use_concentration = st.checkbox("Enable concentration mode", value=False)
+    conc_col1, conc_col2 = st.columns(2)
+    top_n_longs  = conc_col1.number_input("Top N longs",  min_value=5,  max_value=100, value=15, step=5,
+                                           disabled=not use_concentration)
+    top_n_shorts = conc_col2.number_input("Top N shorts", min_value=5,  max_value=100, value=10, step=5,
+                                           disabled=not use_concentration)
+    if use_concentration:
+        with open(CONFIG_DIR / "portfolio.yaml", encoding="utf-8") as _f:
+            _cfg = yaml.safe_load(_f)
+        _lw = _cfg["strategy"]["long_weight"]
+        _sw = _cfg["strategy"]["short_weight"]
+        conc_col1.caption(f"Each long = {_lw/top_n_longs*100:.1f}% of portfolio")
+        conc_col2.caption(f"Each short = {_sw/top_n_shorts*100:.1f}% of portfolio")
+
+    st.info(
+        "**Note on backtesting puts:** Put signals are simulated as short positions (same direction, "
+        "1:1 payoff). The convex upside and theta decay of real put options cannot be reproduced "
+        "without implied volatility history. Use the live system to evaluate put performance."
+    )
+
     run_label = st.text_input(
         "Run label (for comparison)",
-        value=f"run_{start_date.year}_{value_weight:.0%}val_{'sn' if sector_neutral else 'global'}",
+        value=f"run_{start_date.year}_{value_weight:.0%}val_{'conc' if use_concentration else 'div'}_{'sn' if sector_neutral else 'global'}",
     )
 
     if start_date < pd.Timestamp("2020-01-01").date():
@@ -176,6 +203,10 @@ elif page == "Backtest":
             },
             "enable_short_book": enable_short,
             "sector_neutral":    sector_neutral,
+            "concentration": {
+                "top_n_longs":  int(top_n_longs)  if use_concentration else None,
+                "top_n_shorts": int(top_n_shorts) if use_concentration else None,
+            },
         }
 
         with st.spinner("Running backtest... (this takes 2-5 minutes on first run)"):
@@ -249,13 +280,25 @@ elif page == "Signals":
             st.plotly_chart(factor_scores_bar(signals), use_container_width=True)
             st.plotly_chart(exposure_pie(signals), use_container_width=True)
 
-            st.subheader("Long Book")
-            longs = signals[signals["action"] == "BUY"].sort_values("composite_score", ascending=False)
+            longs  = signals[signals["action"] == "BUY"].sort_values("composite_score", ascending=False)
+            shorts = signals[signals["action"] == "SHORT"].sort_values("composite_score")
+            puts   = signals[signals["action"] == "PUT"].sort_values("composite_score")
+
+            st.subheader(f"Long Book ({len(longs)} positions)")
             st.dataframe(longs, use_container_width=True)
 
-            st.subheader("Short Book")
-            shorts = signals[signals["action"] == "SHORT"].sort_values("composite_score")
-            st.dataframe(shorts, use_container_width=True)
+            if not shorts.empty:
+                st.subheader(f"Short Book — shares ({len(shorts)} positions)")
+                st.dataframe(shorts, use_container_width=True)
+
+            if not puts.empty:
+                st.subheader(f"Short Book — puts ({len(puts)} conviction positions)")
+                st.markdown(
+                    "These are the most extreme bottom-ranked names. "
+                    "The system will buy **OTM put contracts** on these instead of short-selling shares. "
+                    "Convex payoff on large down moves, no short squeeze risk, but premium decays over time."
+                )
+                st.dataframe(puts, use_container_width=True)
 
     if run_condor:
         with st.spinner("Scanning for condor opportunities..."):
@@ -290,6 +333,14 @@ elif page == "Research Sandbox":
     enable_short   = sb_col5.checkbox("Enable short book", value=True, key="sandbox_short")
     sector_neutral = sb_col6.checkbox("Sector neutralization", value=True, key="sandbox_sn")
 
+    st.markdown("**Concentration**")
+    sb_conc_col1, sb_conc_col2, sb_conc_col3 = st.columns(3)
+    sb_use_conc   = sb_conc_col1.checkbox("Concentration mode", value=False, key="sandbox_conc")
+    sb_top_longs  = sb_conc_col2.number_input("Top N longs",  min_value=5, max_value=100, value=15, step=5,
+                                               key="sandbox_nl", disabled=not sb_use_conc)
+    sb_top_shorts = sb_conc_col3.number_input("Top N shorts", min_value=5, max_value=100, value=10, step=5,
+                                               key="sandbox_ns", disabled=not sb_use_conc)
+
     if st.button("Preview Signals"):
         with st.spinner("Generating signals..."):
             import yaml
@@ -304,6 +355,10 @@ elif page == "Research Sandbox":
             cfg["score_blend"]["quality_weight"]  = qual_w
             cfg["enable_short_book"] = enable_short
             cfg["sector_neutral"]    = sector_neutral
+            cfg["concentration"] = {
+                "top_n_longs":  int(sb_top_longs)  if sb_use_conc else None,
+                "top_n_shorts": int(sb_top_shorts) if sb_use_conc else None,
+            }
 
             # Use today's S&P 500 members for current signal preview
             today = pd.Timestamp.today().normalize()
